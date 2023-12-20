@@ -1,0 +1,4 @@
+Package: atlasClustering
+Type: Package
+Title: Draft package of the two-stage clustering algorithm for SRT
+Version: 0.0.1
