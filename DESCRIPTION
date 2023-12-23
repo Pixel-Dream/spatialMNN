@@ -1,4 +1,28 @@
 Package: atlasClustering
-Type: Package
-Title: Draft package of the two-stage clustering algorithm for SRT
-Version: 0.0.1
+Title: Scalable Two-level Spatial Clustering for Integrative Analysis of Multi-sample SRT Data
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Haowen", 
+    family = "Zhou", 
+    email = "hzhou52@jhu.edu", 
+    role = c("aut", "cre"),
+    comment = c(ORCID = "YOUR-ORCID-ID"))
+Description: What the package does (one paragraph).
+License: use_gpl3_license()
+Import:
+  tidyverse
+  Seurat
+  SpatialExperiment
+  igraph
+  scry
+  scater
+  graphlayouts
+  reshape2
+  circlize
+  ComplexHeatmap
+  RColorBrewer
+  ggnewscale
+  psych
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3

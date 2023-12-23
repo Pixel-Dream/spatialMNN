@@ -3,9 +3,8 @@
 #' Load Required package
 #' @param verbose Show initialization information
 #' @return Void
-#' @examples 
+#' @examples
 #' init()
-#' @export
 init <- function(verbose=F){
   #suppressMessages(library(spatialLIBD))
   suppressMessages(library(Seurat))
@@ -33,16 +32,22 @@ init <- function(verbose=F){
 #' @param data_mat Expression Matrix
 #' @param scale_coef scale factor
 #' @return Void
-#' @examples 
+#' @examples
 #' # No Example
 myPreprocess <- function(data_mat, scale_coef = 10000){
-  data_mat <- data_mat/matrix(rep(colSums(data_mat), nrow(data_mat)), 
+  data_mat <- data_mat/matrix(rep(colSums(data_mat), nrow(data_mat)),
                               nrow = nrow(data_mat),
                               byrow = F) * scale_coef
   data_mat
 }
 
-
+#' Swap
+#'
+#' Swap elements
+#' @param vec Vector with two elements
+#' @return Void
+#' @examples
+#' # No Example
 swap <- function(vec){
   c(vec[2],vec[1])
 }
@@ -53,17 +58,20 @@ swap <- function(vec){
 #' @param data_mat Expression Matrix
 #' @param scale_coef scale factor
 #' @return Void
-#' @examples 
+#' @examples
 #' # No Example
-
-new_seu_ls <- function(sel_assay="logcounts",
+#' @import Seurat
+#' @import SpatialExperiment
+#' @export
+new_seu_ls <- function(spe,
+                       sel_assay="logcounts",
                        sel_col = c("layer","spatialLIBD"),
                        col_name = c("layer_guess_reordered_short","spatialLIBD")){
   seu_ls <- list()
   #hvg_ls <- c()
   #sel_assay <- "logcounts" # counts logcounts
   stopifnot(is.null(sel_col) | length(sel_col) == length(col_name))
-  
+
   for(i in unique(spe$sample_id)){
     idx <- spe$sample_id == i
     meta_df <- data.frame(barcode = spe@colData@rownames[idx],
@@ -77,11 +85,11 @@ new_seu_ls <- function(sel_assay="logcounts",
         meta_df[[col_name[j]]] <- spe@colData[idx,sel_col[i]]
       }
     }
-    
-    seu_ls[[i]] <- CreateSeuratObject(counts = spe@assays@data@listData[[sel_assay]][,idx],
+
+    seu_ls[[i]] <- SeuratObject::CreateSeuratObject(counts = spe@assays@data@listData[[sel_assay]][,idx],
                                       project = paste0("spe_",i),
                                       meta.data = meta_df)
-    seu_ls[[i]] <- FindVariableFeatures(seu_ls[[i]], verbose = F)
+    seu_ls[[i]] <- Seurat::FindVariableFeatures(seu_ls[[i]], verbose = F)
     #hvg_ls <- unique(c(hvg_ls,VariableFeatures(seurat_ls[[i]])))
   }
   seu_ls
