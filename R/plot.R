@@ -1,10 +1,10 @@
-#' Plot Confusion Matrix 
+#' Plot Confusion Matrix
 #'
 #' Draw Confusion Matrix using ComplexHeatmap
-#' @param x,y vector with discrete values 
+#' @param x,y vector with discrete values
 #' @param col_title Heatmap title
 #' @return A Heatmap-class object.
-#' @examples 
+#' @examples
 #' x_ <- sample(1:4,100,replace = T)
 #' y_ <- sample(1:5,100,replace = T)
 #' plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
@@ -25,7 +25,7 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
       hm_mat[i,j] = sum(x==u_x[i] & y ==u_y[j])
     }
   }
-  hm_mat <- hm_mat/matrix(rep(rowSums(hm_mat),ncol(hm_mat)), 
+  hm_mat <- hm_mat/matrix(rep(rowSums(hm_mat),ncol(hm_mat)),
                           byrow = F,nrow = nrow(hm_mat), ncol = ncol(hm_mat))
   Heatmap(hm_mat,cluster_columns = F, cluster_rows = F,
           col = colorRamp2(seq(0, 1,length.out=5), viridis::viridis(5)),
@@ -38,23 +38,21 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
 #' Plot SRT Slide
 #'
 #' Draw SRT spot array with customized labels
-#' @param meta_data
-#' @param edge_df
-#' @param threshold
+#' @param meta_data A Data Frame contains at least coordinates
+#' @param edge_df A Data Frame contains the edges information, at least 5 columns: `x, y, xend, yend, weight`
+#' @param threshold Threshold of edge weight for displaying edges
 #' @param col_sel column name in `meta_data`
-#' @param pal
-#' @param flip swap x-y coordinates
+#' @param pal Palette
+#' @param flip Whether swap x-y coordinates
 #' @return A Heatmap-class object.
-#' @examples 
-#' x_ <- sample(1:4,100,replace = T)
-#' y_ <- sample(1:5,100,replace = T)
-#' plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
+#' @examples
+#' #TBD
 #' @export
-draw_slide_graph <- function(meta_data, 
-                             edge_df=NULL, 
-                             threshold=NULL, 
-                             col_sel, 
-                             pal = NULL, 
+draw_slide_graph <- function(meta_data,
+                             edge_df=NULL,
+                             threshold=NULL,
+                             col_sel,
+                             pal = NULL,
                              flip = T){
   g <- ggplot()
   if(!is.null(edge_df)){
@@ -63,22 +61,22 @@ draw_slide_graph <- function(meta_data,
     edge_df[["xend"]] <- meta_data[edge_df$to,'coord_x']
     edge_df[["yend"]] <- meta_data[edge_df$to,'coord_y']
     if(is.null(threshold)){
-      g <- g + geom_segment(mapping = aes(x=x,y=y,xend=xend,yend=yend, 
+      g <- g + geom_segment(mapping = aes(x=x,y=y,xend=xend,yend=yend,
                                           color = weight),
                             size=abs(edge_df$weight),
-                            data = edge_df) + 
+                            data = edge_df) +
         scale_colour_gradientn(colours = rev(viridis::rocket(n=10)))
-    }else{ 
+    }else{
       edge_df[["filtered"]] <- as.numeric(edge_df$weight < threshold)
-      g <- g + geom_segment(mapping = aes(x=x,y=y,xend=xend,yend=yend, 
+      g <- g + geom_segment(mapping = aes(x=x,y=y,xend=xend,yend=yend,
                                           color = weight<threshold),
                             size=abs(edge_df$filtered+0.1),
-                            data = edge_df) + 
+                            data = edge_df) +
         scale_color_manual(values = c("grey70","red"))
     }
     g <- g + new_scale_colour()
   }
-  g <- g + geom_point(mapping = aes_string(x = "coord_x", y = "coord_y", color=col_sel), 
+  g <- g + geom_point(mapping = aes_string(x = "coord_x", y = "coord_y", color=col_sel),
                       data = meta_data)
   if(is.numeric(meta_data[[col_sel]])){
     require(viridis)
@@ -88,7 +86,7 @@ draw_slide_graph <- function(meta_data,
     else g <- g + scale_colour_manual(values = pal)
   }
   g <- g + theme_classic()
-  
+
   if(flip) g + coord_flip()
   else g
 }

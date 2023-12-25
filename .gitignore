@@ -4,6 +4,8 @@
 
 # Session Data files
 .RData
+*.RDS
+*.rds
 .RDataTmp
 
 # User-specific files

@@ -55,25 +55,31 @@ swap <- function(vec){
 #' Convert spe to seurat list
 #'
 #' Convert spatialExperiment object to a list of Seurat objects based on sample id
-#' @param data_mat Expression Matrix
-#' @param scale_coef scale factor
-#' @return Void
+#' @param spe Spatial Experiment or Singel Cell Experiment Object
+#' @param sample_id Column name contain sample IDs
+#' @param sel_assay Select assay to
+#' @param sel_col Columns to be included in the `meta.data`
+#' @param col_name Names of the selected columns
+#' @return A list of Seurat Objects
 #' @examples
 #' # No Example
 #' @import Seurat
 #' @import SpatialExperiment
 #' @export
-new_seu_ls <- function(spe,
+spe2SeuList <- function(spe,
                        sel_assay="logcounts",
-                       sel_col = c("layer","spatialLIBD"),
-                       col_name = c("layer_guess_reordered_short","spatialLIBD")){
+                       sample_id = "sample_id",
+                       sel_col = c("layer_guess_reordered_short","spatialLIBD"),
+                       col_name = c("layer","spatialLIBD")){
   seu_ls <- list()
   #hvg_ls <- c()
   #sel_assay <- "logcounts" # counts logcounts
-  stopifnot(is.null(sel_col) | length(sel_col) == length(col_name))
+  stopifnot(is.null(sel_col) | is.null(col_name) | length(sel_col) == length(col_name))
 
-  for(i in unique(spe$sample_id)){
-    idx <- spe$sample_id == i
+  if(!is.null(sel_col) & is.null(col_name))col_name = sel_col
+
+  for(i in unique(spe[[sample_id]])){
+    idx <- spe[[sample_id]] == i
     meta_df <- data.frame(barcode = spe@colData@rownames[idx],
                           coord_x = spe@int_colData@listData[["spatialCoords"]][idx,1],
                           coord_y = spe@int_colData@listData[["spatialCoords"]][idx,2],
@@ -82,7 +88,7 @@ new_seu_ls <- function(spe,
                           row.names = colnames(spe@assays@data@listData[[sel_assay]])[idx])
     if(!is.null(sel_col)){
       for(j in seq_along(sel_col)){
-        meta_df[[col_name[j]]] <- spe@colData[idx,sel_col[i]]
+        meta_df[[col_name[j]]] <- spe@colData[idx,sel_col[j]]
       }
     }
 

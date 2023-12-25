@@ -2,29 +2,33 @@
 #'
 #' Main function
 #' @param seu_ls A list of Seurat Objects, columns `coord_x,coord_y` must be included in the `meta.data`
-#' @param cor_threshold
-#' @param nn
-#' @param nn_2
-#' @param cl_resolution
+#' @param cor_threshold Threshold for edge pruning
+#' @param nn Number of NN for graph building
+#' @param nn_2 For SNN correlation only
+#' @param cl_resolution Louvain resolution for clustering
 #' @param top_pcs Number of selected top PCs
 #' @param cl_min Minimal nodes in identified niches
-#' @param find_HVG
+#' @param find_HVG Whether find HVG for downstream analysis or use full gene list
 #' @param hvg HVG numbers, default: `2000`
-#' @param cor_met Correlation calculation method, available methods:`("PC","HVG","SNN")`
+#' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param edge_smoothing Perform smoothed edge detection
 #' @param use_glmpca Use GLMPCA or regular PCA
 #' @param verbose Output clustering information
 #' @return A list of Seurat Objects
 #' @examples
-#'
+#' # TBD
+#' @import Seurat
+#' @import scater
+#' @import scry
 #' @export
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, verbose = F){
+  init()
   tic <- Sys.time()
   for(i in names(seu_ls)){
     #seu_ls[[i]] <- NormalizeData(seu_ls[[i]], normalization.method = "LogNormalize", scale.factor = 10000,verbose = F)
-    stopifnot("Not supported Cor Calc Method" = cor_slot %in% c("PC","HVG","SNN"))
+    stopifnot("Not supported Cor Calc Method" = cor_met %in% c("PC","HVG","SNN"))
     if(find_HVG){
       stopifnot("HVG# Exceeded" = hvg <= nrow(seu_ls[[i]]))
       seu_ls[[i]] <- FindVariableFeatures(seu_ls[[i]], selection.method = "vst", nfeatures = hvg,verbose = F)
@@ -32,8 +36,6 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
       VariableFeatures(object = seu_ls[[i]]) <- row.names(seu_ls[[i]])
       hvg <- nrow(seu_ls[[i]])
     }
-    require(scater)
-    require(scry)
 
 
     if(use_glmpca == T){
@@ -51,11 +53,11 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
     }
 
     dist_knn <- dbscan::kNN(seu_ls[[i]]@meta.data %>% select(coord_x,coord_y),k=nn)
-    if(cor_slot == "SNN") expr_knn <- dbscan::kNN(PCA_res[,1:top_pcs],k=nn_2)
+    if(cor_met == "SNN") expr_knn <- dbscan::kNN(PCA_res[,1:top_pcs],k=nn_2)
 
     if(!edge_smoothing){
       seq_vec <- seq_len(ncol(seu_ls[[i]]))
-      if(cor_slot == "SNN"){
+      if(cor_met == "SNN"){
         expr_knn <- dbscan::kNN(PCA_res[,1:top_pcs],k=nn_2)
         cor_mat <- matrix(NA, nrow = ncol(seu_ls[[i]]), ncol = ncol(seu_ls[[i]]),
                           dimnames = list(colnames(seu_ls[[i]]), colnames(seu_ls[[i]])))
@@ -72,8 +74,8 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
         cor_mat[is.na(cor_mat)] <- 0
       }
       else{
-        if(cor_slot == "PC") cor_mat <- cor(t(as.matrix(PCA_res[,1:top_pcs])),method = "pearson")
-        else if(cor_slot == "HVG") cor_mat <- cor(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),],method = "pearson")
+        if(cor_met == "PC") cor_mat <- cor(t(as.matrix(PCA_res[,1:top_pcs])),method = "pearson")
+        else if(cor_met == "HVG") cor_mat <- cor(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),],method = "pearson")
 
         for(j in seq_vec){
           cor_mat[j,seq_vec[-unlist(dist_knn$id[j,])]] <- 0
@@ -95,16 +97,16 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
           nn_vec1 <- c(j,nn_vec1[!nn_vec1 %in% nn_common])
           nn_vec2 <- c(k,nn_vec2[!nn_vec2 %in% nn_common])
 
-          if(cor_slot == "PC"){
+          if(cor_met == "PC"){
             cor_val <- cor(x = colMeans(matrix(PCA_res[nn_vec1,1:top_pcs], ncol = top_pcs)),
                            y = colMeans(matrix(PCA_res[nn_vec2,1:top_pcs], ncol = top_pcs)),
                            method = "pearson")
-          }else if(cor_slot == "HVG") {
+          }else if(cor_met == "HVG") {
             cor_mat <- cor(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),],method = "pearson")
             cor_val <- cor(x = rowMeans(matrix(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),nn_vec1], nrow = hvg)),
                            y = rowMeans(matrix(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),nn_vec2], nrow = hvg)),
                            method = "pearson")
-          }else if(cor_slot == "SNN"){
+          }else if(cor_met == "SNN"){
             cor_val <- map2(.x = rep(nn_vec1,length(nn_vec2)),
                             .y = rep(nn_vec2,each = length(nn_vec1)),
                             .f = function(x,y){
@@ -180,6 +182,8 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
   seu_ls
 }
 
+
+
 mat_cor <- function(mat_x, mat_y){
   cor_mat <- matrix(0,nrow = nrow(mat_x),ncol = nrow(mat_y))
   for(i in seq_len(nrow(mat_x))){
@@ -207,16 +211,38 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
   louvain_res
 }
 
-
+#' Integrative Clustering
+#'
+#' Main function 2
+#' @param seu_ls A list of Seurat Objects from `stage_1` output
+#' @param nn_2 MNN parameter
+#' @param top_pcs Number of selected top PCs
+#' @param cl_key Column contains primary cluster labels
+#' @param rtn_seurat Return a Seurat object with averaged expression profile and integrative clustering results
+#' @param method Secondary Clustering algorithm, available methods:`("Louvain","MNN")`
+#' @param hly_cor Threshold for highly correlated clusters
+#' @param hvg HVG number for secondary clustering
+#' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
+#' @param use_glmpca Use GLMPCA or regular PCA
+#' @param resolution Secondary clustering resolution
+#' @param rare_ct Rare cell type detection method, available methods:`("a","m","none")`
+#' @param verbose Output clustering information
+#' @return A list of Seurat Objects
+#' @examples
+#' # TBD
+#' @import scater
+#' @import scry
+#' @export
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
-                    rtn_seurat = F,method="louvain", hly_cor = 0.9, hvg = 2000, cor_slot = "PC", use_glmpca = F, resolution = 1,
-                    rare_ct="none",use_leiden = F){
+                    rtn_seurat = F, method="louvain", hly_cor = 0.9, hvg = 2000, cor_met = "PC",
+                    use_glmpca = F, resolution = 1,
+                    rare_ct="none", verbose = F){
   tic <- Sys.time()
   hvg_union <- c()
   gene_intersect <- row.names(seu_ls[[names(seu_ls)[1]]])
   cl_num <- c()
 
-  stopifnot("Not supported Cor Calc Method" = cor_slot %in% c("PC","HVG"))
+  stopifnot("Not supported Cor Calc Method" = cor_met %in% c("PC","HVG"))
 
   for(i in names(seu_ls)){
     hvg_union <- union(hvg_union,VariableFeatures(object = seu_ls[[i]]))
@@ -238,7 +264,8 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
   for(i in seq_len(nrow(cl_df))){
     idx <- which(seu_ls[[cl_df$sample[i]]]@meta.data[[cl_key]] == cl_df$cluster[i])
-    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx] %>% rowSums(.)/length(idx)
+    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx] %>%
+        as.matrix(.) %>% rowSums(.)/length(idx)
     else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx]
   }
 
@@ -256,9 +283,9 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   }
 
   if(method == "louvain"){
-    if(cor_slot == "PC"){
+    if(cor_met == "PC"){
       cor_mat <- cor(t(as.matrix(cl_expr_obj@reductions[["pca"]]@cell.embeddings[,1:top_pcs])),method = "pearson")
-    }else if(cor_slot == "HVG") cor_mat <- cor(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj),],method = "pearson")
+    }else if(cor_met == "HVG") cor_mat <- cor(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj),],method = "pearson")
 
     louvain_res <- louvain_w_cor(cor_mat)
     #table(louvain_res$membership)
@@ -293,10 +320,10 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
         idx_j <- cl_expr_obj@meta.data[["orig.ident"]] == levels(cl_expr_obj@meta.data[["orig.ident"]])[j]
 
-        if(cor_slot == "PC"){
+        if(cor_met == "PC"){
           mat_i <- as.matrix(cl_expr_obj@reductions[["pca"]]@cell.embeddings[idx_i,1:top_pcs])
           mat_j <- as.matrix(cl_expr_obj@reductions[["pca"]]@cell.embeddings[idx_j,1:top_pcs])
-        }else if(cor_slot == "HVG"){
+        }else if(cor_met == "HVG"){
           mat_i <- as.matrix(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj), idx_i]) %>% t()
           mat_j <- as.matrix(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj), idx_j]) %>% t()
         }
@@ -328,24 +355,15 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
       }
     }
-    #layout <- layout_with_kk(g)
-    #f <- factor(node_df$sample)
-    #vcols <- chooseColors(palettes_name = "Blink 23",
-    #                             n_colors = length(levels(f)), plot_colors = F)
-    #cols_cluster <- vcols[f]
-    #plot(g, layout = layout,vertex.size=3, vertex.color=cols_cluster, vertex.label.cex=0.1)
-    #legend("topleft", legend = levels(f), pch = 16, col = vcols, bty = "n")
-    if(use_leiden == T){
-      louvain_res <- cluster_leiden(g, resolution_parameter = resolution)
-    }else louvain_res <- cluster_louvain(g, resolution = resolution)
-    #table(louvain_res$membership)
+    louvain_res <- cluster_louvain(g, resolution = resolution)
+
     cl_df[["louvain"]] <- as.character(louvain_res$membership)
     sml_cl_idx <- names(table(cl_df[["louvain"]]))[table(cl_df[["louvain"]]) < 2]
     cl_df[["louvain"]][cl_df[["louvain"]] %in% sml_cl_idx] <- NA
     if(rare_ct == "a"){
-      if(cor_slot == "PC"){
+      if(cor_met == "PC"){
         cor_mat <- cor(t(as.matrix(cl_expr_obj@reductions[["pca"]]@cell.embeddings[is.na(cl_df[["louvain"]]),1:top_pcs])),method = "pearson")
-      }else if(cor_slot == "HVG") cor_mat <- cor(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj),is.na(cl_df[["louvain"]])],method = "pearson")
+      }else if(cor_met == "HVG") cor_mat <- cor(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj),is.na(cl_df[["louvain"]])],method = "pearson")
 
       louvain_res <- louvain_w_cor(cor_mat, nn_=20,res_ = 1)
       #table(louvain_res$membership)
@@ -362,9 +380,6 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
 
   }
-
-
-
 
   cl_df[["umap_1"]] <- cl_expr_obj@reductions[["umap"]]@cell.embeddings[,1]
   cl_df[["umap_2"]] <- cl_expr_obj@reductions[["umap"]]@cell.embeddings[,2]
@@ -386,16 +401,32 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   }
 }
 
-assign_label <- function(seu_ls, cl_df,nn,cor_threshold = 0.2,cl_key = "merged_cluster"){
+
+#' Assign labels
+#'
+#' Assign labels to each spot based on integrated clustering results
+#' @param seu_ls A list of Seurat Objects from `stage_1` results
+#' @param cl_df A Dataframe from `stage_2`, containing the clustering results
+#' @param anno Annotation string
+#' @param cor_threshold Threshold for edge pruning in stage 1
+#' @param cl_key Column for clustering labels
+#' @return A list of Seurat Objects
+#' @examples
+#' # TBD
+#' @import scater
+#' @import scry
+#' @export
+assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
+                         cl_key = "merged_cluster"){
   # Assign secondary clustering label
   for(i in names(seu_ls)){
-    seu_ls[[i]]@meta.data[[paste0("sec_cluster_",nn)]] <- apply(seu_ls[[i]]@meta.data,1,
+    seu_ls[[i]]@meta.data[[paste0("sec_cluster_",anno)]] <- apply(seu_ls[[i]]@meta.data,1,
                                                                 FUN = function(x){
                                                                   cl_df$louvain[cl_df$sample==i & cl_df$cluster==x[[cl_key]]]
                                                                 })
-    seu_ls[[i]]@misc[[paste0("graph_plot_cluster_sec_",nn)]] <-
+    seu_ls[[i]]@misc[[paste0("graph_plot_cluster_sec_",anno)]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
-                       cor_threshold,paste0("sec_cluster_",nn)) +
+                       cor_threshold,paste0("sec_cluster_",anno)) +
       labs(title = paste("sample:", i))
   }
   seu_ls

@@ -6,7 +6,7 @@ Authors@R:
     family = "Zhou", 
     email = "hzhou52@jhu.edu", 
     role = c("aut", "cre"),
-    comment = c(ORCID = "YOUR-ORCID-ID"))
+    comment = c(ORCID = "0000-0001-9678-1865"))
 Description: What the package does (one paragraph).
 License: use_gpl3_license()
 Import:
