@@ -20,6 +20,7 @@
 #' @import Seurat
 #' @import scater
 #' @import scry
+#' @importFrom dbscan kNN
 #' @export
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",

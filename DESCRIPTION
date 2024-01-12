@@ -9,20 +9,32 @@ Authors@R:
     comment = c(ORCID = "0000-0001-9678-1865"))
 Description: What the package does (one paragraph).
 License: use_gpl3_license()
-Import:
-  tidyverse
-  Seurat
-  SpatialExperiment
-  igraph
-  scry
-  scater
-  graphlayouts
-  reshape2
-  circlize
-  ComplexHeatmap
-  RColorBrewer
-  ggnewscale
+Imports:
+  ggplot2,
+  dplyr,
+  dbscan,
+  Seurat,
+  SpatialExperiment,
+  igraph,
+  scry,
+  scater,
+  graphlayouts,
+  reshape2,
+  circlize,
+  ComplexHeatmap,
+  RColorBrewer,
+  ggnewscale,
   psych
 Encoding: UTF-8
+biocViews: 
+    Spatial, 
+    SingleCell,
+    Transcriptomics,
+    Clustering,
+    Software
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.3
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

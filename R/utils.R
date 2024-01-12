@@ -1,31 +1,3 @@
-#' Package Initialization
-#'
-#' Load Required package
-#' @param verbose Show initialization information
-#' @return Void
-#' @examples
-#' init()
-init <- function(verbose=F){
-  #suppressMessages(library(spatialLIBD))
-  suppressMessages(library(Seurat))
-  suppressMessages(library(ggpubr))
-  suppressMessages(library(tidyverse))
-  #suppressMessages(library(PRECAST))
-  suppressMessages(library(igraph))
-  suppressMessages(library(psych))
-  suppressMessages(library(ggnewscale))
-  suppressMessages(library(RColorBrewer))
-  suppressMessages(library(circlize))
-  #suppressMessages(library(SpotClean))
-  suppressMessages(library(ComplexHeatmap))
-  suppressMessages(require(circlize))
-  suppressMessages(library(reshape2))
-  suppressMessages(library(graphlayouts))
-  suppressMessages(require(scater))
-  suppressMessages(require(scry))
-  if(verbose) message("Initialize done!")
-}
-
 #' Preprocess
 #'
 #' Do column scale
