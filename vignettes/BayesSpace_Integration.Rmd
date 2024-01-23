@@ -1,0 +1,65 @@
+---
+title: "BayesSpace_Integration"
+author: "Anonymous"
+date: "2024-01-16"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+library(spatialLIBD)
+library(BayesSpace)
+library(harmony)
+library(scater)
+```
+
+## Run BayesSpace with 12 samples
+
+```{r }
+ehub <- ExperimentHub::ExperimentHub()
+## Download the small example sce data
+spe <- fetch_data(type = "spe", eh = ehub)
+
+spe = spatialPreprocess(spe, n.PCs = 50) #lognormalize, PCA
+
+spe = RunHarmony(spe, "sample_id", verbose = F)
+spe = runUMAP(spe, dimred = "HARMONY", name = "UMAP.HARMONY")
+
+ggplot(data.frame(reducedDim(spe, "UMAP.HARMONY")), 
+       aes(x = X1, y = X2, color = factor(spe$sample_id))) +
+  geom_point() +
+  labs(color = "Sample") +
+  theme_bw()
+
+```
+
+```{r }
+spe@colData@listData[["row"]] <- spe$array_row
+spe@colData@listData[["col"]] <- spe$array_col
+
+sample_names <- levels(as.factor(spe$sample_id))
+
+for(i in seq_along(sample_names)){
+  spe$row[spe$sample_id == sample_names[i]] <- spe$row[spe$sample_id == sample_names[i]] + 100*((i-1)%%3)
+  spe$col[spe$sample_id == sample_names[i]] <- spe$col[spe$sample_id == sample_names[i]] + 150*floor((i-1)/3)
+}
+
+clusterPlot(spe, "sample_id", color = NA) + #make sure no overlap between samples
+  labs(fill = "Sample", title = "Offset check")
+
+spe = spatialCluster(spe, use.dimred = "HARMONY", q = 7, nrep = 10000) #use HARMONY
+clusterPlot(spe, color = NA) + #plot clusters
+  labs(title = "BayesSpace joint clustering")
+
+ari_vec <- sapply(sample_names,
+                  function(x){
+                     mclust::adjustedRandIndex(
+                       spe$layer_guess_reordered_short[spe$sample_id == x], 
+                       spe$spatial.cluster[spe$sample_id == x])
+                  })
+
+
+```
+
+
