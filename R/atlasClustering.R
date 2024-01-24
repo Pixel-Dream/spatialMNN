@@ -1,6 +1,6 @@
 #' Niche Identification
+#' Main function ??
 #'
-#' Main function
 #' @param seu_ls A list of Seurat Objects, columns `coord_x,coord_y` must be included in the `meta.data`
 #' @param cor_threshold Threshold for edge pruning
 #' @param nn Number of NN for graph building
@@ -14,14 +14,18 @@
 #' @param edge_smoothing Perform smoothed edge detection
 #' @param use_glmpca Use GLMPCA or regular PCA
 #' @param verbose Output clustering information
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import Seurat
 #' @import scater
 #' @import scry
+#'
 #' @importFrom dbscan kNN
 #' @export
+#'
+#' @examples
+#' TBD
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, verbose = F){
@@ -228,12 +232,16 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @param resolution Secondary clustering resolution
 #' @param rare_ct Rare cell type detection method, available methods:`("a","m","none")`
 #' @param verbose Output clustering information
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import scater
 #' @import scry
+#'
 #' @export
+#'
+#' @examples
+#' TBD
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                     rtn_seurat = F, method="louvain", hly_cor = 0.9, hvg = 2000, cor_met = "PC",
                     use_glmpca = F, resolution = 1,
@@ -411,12 +419,16 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 #' @param anno Annotation string
 #' @param cor_threshold Threshold for edge pruning in stage 1
 #' @param cl_key Column for clustering labels
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import scater
 #' @import scry
+#'
 #' @export
+#'
+#' @examples
+#' TBD
 assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
                          cl_key = "merged_cluster"){
   # Assign secondary clustering label

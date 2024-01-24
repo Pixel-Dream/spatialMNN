@@ -1,11 +1,15 @@
 #' Preprocess
 #'
 #' Do column scale
+#'
 #' @param data_mat Expression Matrix
 #' @param scale_coef scale factor
+#'
 #' @return Void
+#'
 #' @examples
 #' # No Example
+
 myPreprocess <- function(data_mat, scale_coef = 10000){
   data_mat <- data_mat/matrix(rep(colSums(data_mat), nrow(data_mat)),
                               nrow = nrow(data_mat),
@@ -16,28 +20,39 @@ myPreprocess <- function(data_mat, scale_coef = 10000){
 #' Swap
 #'
 #' Swap elements
+#'
 #' @param vec Vector with two elements
+#'
 #' @return Void
+#'
 #' @examples
 #' # No Example
+
 swap <- function(vec){
   c(vec[2],vec[1])
 }
 
+
 #' Convert spe to seurat list
 #'
 #' Convert spatialExperiment object to a list of Seurat objects based on sample id
+#'
 #' @param spe Spatial Experiment or Singel Cell Experiment Object
 #' @param sample_id Column name contain sample IDs
 #' @param sel_assay Select assay to
 #' @param sel_col Columns to be included in the `meta.data`
 #' @param col_name Names of the selected columns
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # No Example
+#'
 #' @import Seurat
 #' @import SpatialExperiment
+#'
 #' @export
+#'
+#' #' @examples
+#' # No Example
+
 spe2SeuList <- function(spe,
                        sel_assay="logcounts",
                        sample_id = "sample_id",
