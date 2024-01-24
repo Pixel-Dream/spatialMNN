@@ -39,6 +39,8 @@ library(scater)
 # saveRDS(spe,"/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
 spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
 
+#saveRDS(spe,"/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
+#spe <- readRDS("/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
 ```
 
 
