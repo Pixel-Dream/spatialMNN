@@ -89,3 +89,64 @@ spe2SeuList <- function(spe,
 }
 
 
+#' Louvain with Correlation Matrix
+#'
+#'
+#'
+#' @param cor_mat_ Correlation Matrix
+#' @param nn_ ?
+#' @param res_ ?
+#'
+#' @return Clustered Data
+#'
+#' @import igraph
+#'
+#' @export
+#'
+#' #' @examples
+#' # No Example
+louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
+  for(j in seq_len(nrow(cor_mat_))){
+    not_nn_vec <- sort(cor_mat_[,j],decreasing = T)[(nn_+2):ncol(cor_mat_)] %>% names()
+    cor_mat_[j,not_nn_vec] <- 0
+    cor_mat_[j,j] <- 0
+  }
+  g <- graph.adjacency(cor_mat_, mode = "directed",
+                       weighted = TRUE, diag = TRUE)
+  g <- as.undirected(g,mode = "mutual")
+
+  louvain_res <- cluster_louvain(g, resolution = res_)
+  louvain_res
+}
+
+
+#' ZZZ
+#'
+#'
+#'
+#' @param cor_mat_ Correlation Matrix
+#' @param nn_ ?
+#' @param res_ ?
+#'
+#' @return Clustered Data
+#'
+#' @import igraph
+#'
+#' @export
+#'
+#' #' @examples
+#' # No Example
+mat_cor <- function(mat_x, mat_y){
+  cor_mat <- matrix(0,nrow = nrow(mat_x),ncol = nrow(mat_y))
+  for(i in seq_len(nrow(mat_x))){
+    cor_mat[i,] <- sapply(seq_len(nrow(mat_y)),
+                          function(x){
+                            cor(x=mat_x[i,],y=mat_y[x,],method = "pearson")
+                          })
+  }
+  row.names(cor_mat) <- row.names(mat_x)
+  colnames(cor_mat) <- row.names(mat_y)
+  cor_mat
+}
+
+

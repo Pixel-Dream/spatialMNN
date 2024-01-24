@@ -43,7 +43,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
 
 
     if(use_glmpca == T){
-      mat <- as.matrix(seu_ls[[i]]@assays$RNA@counts[VariableFeatures(object = seu_ls[[i]]),])
+      mat <- as.matrix(seu_ls[[i]]@assays$RNA$counts[VariableFeatures(object = seu_ls[[i]]),]) # CH: changed @ to $ before "counts"
       mat <- nullResiduals(mat, type="deviance")
       PCA_res <- suppressWarnings(calculatePCA(mat,ncomponents = top_pcs, scale = TRUE, BSPARAM = BiocSingular::RandomParam()))
       seu_ls[[i]]@misc[["glmpca"]] <- PCA_res %>% as.matrix()
@@ -130,7 +130,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
     g <- igraph::graph.adjacency(cor_mat, mode = "directed",
                          weighted = TRUE, diag = TRUE)
 
-    seu_ls[[i]]@misc[["raw_edges"]] <- as_data_frame(g,"edges")
+    seu_ls[[i]]@misc[["raw_edges"]] <- igraph::as_data_frame(g,"edges")
     seu_ls[[i]]@misc[["raw_graph_plot_label"]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["raw_edges"]],
                        cor_threshold,"layer")
@@ -141,7 +141,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
                          weighted = TRUE, diag = TRUE)
     g <- as.undirected(g,mode = "mutual")
 
-    seu_ls[[i]]@misc[["edges"]] <- as_data_frame(g,"edges")
+    seu_ls[[i]]@misc[["edges"]] <- igraph::as_data_frame(g,"edges")
     seu_ls[[i]]@misc[["graph_plot_label"]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
                        cor_threshold,"layer")
@@ -272,9 +272,9 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
   for(i in seq_len(nrow(cl_df))){
     idx <- which(seu_ls[[cl_df$sample[i]]]@meta.data[[cl_key]] == cl_df$cluster[i])
-    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx] %>%
+    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] %>% # CH: change @data to counts
         as.matrix(.) %>% rowSums(.)/length(idx)
-    else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx]
+    else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] # CH: change @data to counts
   }
 
   cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
