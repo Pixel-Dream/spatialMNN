@@ -20,8 +20,8 @@
 #' @import Seurat
 #' @import scater
 #' @import scry
-#'
 #' @importFrom dbscan kNN
+#'
 #' @export
 #'
 #' @examples
@@ -29,7 +29,6 @@
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, verbose = F){
-  init()
   tic <- Sys.time()
   for(i in names(seu_ls)){
     #seu_ls[[i]] <- NormalizeData(seu_ls[[i]], normalization.method = "LogNormalize", scale.factor = 10000,verbose = F)

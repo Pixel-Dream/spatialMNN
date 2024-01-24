@@ -23,14 +23,14 @@ library(spatialLIBD)
 ## Download/Load Data from ExperimentHub
 
 ```{r Download Data}
-## Connect to ExperimentHub
-ehub <- ExperimentHub::ExperimentHub()
-## Download the small example sce data
-spe <- fetch_data(type = "spe", eh = ehub)
+# ## Connect to ExperimentHub
+# ehub <- ExperimentHub::ExperimentHub()
+# ## Download the small example sce data
+# spe <- fetch_data(type = "spe", eh = ehub)
 
 ## You may save the spe object and load from local
-#saveRDS(spe,"/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
-#spe <- readRDS("/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
+# saveRDS(spe,"/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
 
 ```
 
@@ -44,6 +44,8 @@ seurat_ls <- spe2SeuList(spe,
 
 seurat_ls <- stage_1(seurat_ls, find_HVG = T, top_pcs = 8, cor_threshold = 0.6, cor_met = "PC",
                      edge_smoothing = T, nn = 6, use_glmpca = T, verbose = T)
+# CH: Error in as.matrix(seu_ls[[i]]@assays$RNA@counts[VariableFeatures(object = seu_ls[[i]]),  : 
+#  no slot of name "counts" for this object of class "Assay5"
 
 rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
                   rtn_seurat = T, nn_2 = 10, method = "MNN",
