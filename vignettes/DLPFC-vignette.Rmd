@@ -17,21 +17,30 @@ knitr::opts_chunk$set(
 ```{r setup}
 library(atlasClustering)
 library(spatialLIBD)
+library(Seurat)
+library(magrittr)
+library(tidyverse)
+library(ggnewscale) # for new_scale_colour()
+library(igraph)
+library(scry)
+library(scater)
 ```
 
 
 ## Download/Load Data from ExperimentHub
 
 ```{r Download Data}
-## Connect to ExperimentHub
-ehub <- ExperimentHub::ExperimentHub()
-## Download the small example sce data
-spe <- fetch_data(type = "spe", eh = ehub)
+# ## Connect to ExperimentHub
+# ehub <- ExperimentHub::ExperimentHub()
+# ## Download the small example sce data
+# spe <- fetch_data(type = "spe", eh = ehub)
 
 ## You may save the spe object and load from local
+# saveRDS(spe,"/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+
 #saveRDS(spe,"/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
 #spe <- readRDS("/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
-
 ```
 
 
@@ -42,12 +51,14 @@ seurat_ls <- spe2SeuList(spe,
                          sel_col = c("layer_guess_reordered_short","spatialLIBD"),
                          col_name = c("layer","spatialLIBD"))
 
-seurat_ls <- stage_1(seurat_ls, find_HVG = T, top_pcs = 8, cor_threshold = 0.6, cor_met = "PC",
-                     edge_smoothing = T, nn = 6, use_glmpca = T, verbose = T)
+seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+                     top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+                     edge_smoothing = T, use_glmpca = T, verbose = T)
 
 rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
                   rtn_seurat = T, nn_2 = 10, method = "MNN",
                   top_pcs = 8, use_glmpca = T, rare_ct = "m", resolution = 1)
+
 seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
 ```
 
@@ -55,7 +66,7 @@ seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_
 ```{r Visulize Results}
 layer_pal <- RColorBrewer::brewer.pal(7,"Set1")
 names(layer_pal) <- c("L1", "L2", "L3", "L4", "L5", "L6", "WM")
-
+library(ggpubr)
 
 ggarrange(plotlist = list("MNN1"= draw_slide_graph(seurat_ls[["151507"]]@meta.data,NULL,NULL,"sec_cluster_MNN"),
                           "GT1"=  draw_slide_graph(seurat_ls[["151507"]]@meta.data,NULL,NULL,"layer", layer_pal),
@@ -72,4 +83,6 @@ ari_vec <- sapply(seq_along(seurat_ls),function(i){
 })
 
 message(paste0("Sample\tARI:\n",paste(names(seurat_ls),'\t',format(ari_vec,digits = 3), collapse = "\n") ))
+
+mean(ari_vec)
 ```

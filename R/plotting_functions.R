@@ -3,12 +3,16 @@
 #' Draw Confusion Matrix using ComplexHeatmap
 #' @param x,y vector with discrete values
 #' @param col_title Heatmap title
+#'
 #' @return A Heatmap-class object.
+#'
+#' @export
+#'
 #' @examples
 #' x_ <- sample(1:4,100,replace = T)
 #' y_ <- sample(1:5,100,replace = T)
 #' plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
-#' @export
+
 plotConfusionMatrix <- function(x,y,col_title = ""){
   require(ComplexHeatmap)
   require(circlize)
@@ -33,8 +37,6 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
 }
 
 
-
-
 #' Plot SRT Slide
 #'
 #' Draw SRT spot array with customized labels
@@ -44,10 +46,14 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
 #' @param col_sel column name in `meta_data`
 #' @param pal Palette
 #' @param flip Whether swap x-y coordinates
+#'
 #' @return A Heatmap-class object.
+#'
+#' @export
+#'
 #' @examples
 #' #TBD
-#' @export
+
 draw_slide_graph <- function(meta_data,
                              edge_df=NULL,
                              threshold=NULL,
