@@ -27,7 +27,7 @@ spe = RunHarmony(spe, "sample_id", verbose = F)
 spe = runUMAP(spe, dimred = "HARMONY", name = "UMAP.HARMONY")
 
 ggplot(data.frame(reducedDim(spe, "UMAP.HARMONY")), 
-       aes(x = X1, y = X2, color = factor(spe$sample_id))) +
+       aes(x = UMAP1, y = UMAP2, color = factor(spe$sample_id))) +
   geom_point() +
   labs(color = "Sample") +
   theme_bw()
@@ -45,8 +45,9 @@ for(i in seq_along(sample_names)){
   spe$col[spe$sample_id == sample_names[i]] <- spe$col[spe$sample_id == sample_names[i]] + 150*floor((i-1)/3)
 }
 
-clusterPlot(spe, "sample_id", color = NA) + #make sure no overlap between samples
+clusterPlot(spe, label = "sample_id") + #make sure no overlap between samples
   labs(fill = "Sample", title = "Offset check")
+# CH: getting error here - clusterPlot works with SingleCellExperiment and this is SpatialExperiment
 
 spe = spatialCluster(spe, use.dimred = "HARMONY", q = 7, nrep = 10000) #use HARMONY
 clusterPlot(spe, color = NA) + #plot clusters

@@ -1,6 +1,6 @@
 #' Niche Identification
+#' Main function ??
 #'
-#' Main function
 #' @param seu_ls A list of Seurat Objects, columns `coord_x,coord_y` must be included in the `meta.data`
 #' @param cor_threshold Threshold for edge pruning
 #' @param nn Number of NN for graph building
@@ -14,18 +14,21 @@
 #' @param edge_smoothing Perform smoothed edge detection
 #' @param use_glmpca Use GLMPCA or regular PCA
 #' @param verbose Output clustering information
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import Seurat
 #' @import scater
 #' @import scry
 #' @importFrom dbscan kNN
+#'
 #' @export
+#'
+#' @examples
+#' TBD
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, verbose = F){
-  init()
   tic <- Sys.time()
   for(i in names(seu_ls)){
     #seu_ls[[i]] <- NormalizeData(seu_ls[[i]], normalization.method = "LogNormalize", scale.factor = 10000,verbose = F)
@@ -40,7 +43,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
 
 
     if(use_glmpca == T){
-      mat <- as.matrix(seu_ls[[i]]@assays$RNA@counts[VariableFeatures(object = seu_ls[[i]]),])
+      mat <- as.matrix(seu_ls[[i]]@assays$RNA$counts[VariableFeatures(object = seu_ls[[i]]),]) # CH: changed @ to $ before "counts"
       mat <- nullResiduals(mat, type="deviance")
       PCA_res <- suppressWarnings(calculatePCA(mat,ncomponents = top_pcs, scale = TRUE, BSPARAM = BiocSingular::RandomParam()))
       seu_ls[[i]]@misc[["glmpca"]] <- PCA_res %>% as.matrix()
@@ -127,7 +130,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
     g <- igraph::graph.adjacency(cor_mat, mode = "directed",
                          weighted = TRUE, diag = TRUE)
 
-    seu_ls[[i]]@misc[["raw_edges"]] <- as_data_frame(g,"edges")
+    seu_ls[[i]]@misc[["raw_edges"]] <- igraph::as_data_frame(g,"edges")
     seu_ls[[i]]@misc[["raw_graph_plot_label"]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["raw_edges"]],
                        cor_threshold,"layer")
@@ -138,7 +141,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
                          weighted = TRUE, diag = TRUE)
     g <- as.undirected(g,mode = "mutual")
 
-    seu_ls[[i]]@misc[["edges"]] <- as_data_frame(g,"edges")
+    seu_ls[[i]]@misc[["edges"]] <- igraph::as_data_frame(g,"edges")
     seu_ls[[i]]@misc[["graph_plot_label"]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
                        cor_threshold,"layer")
@@ -228,12 +231,16 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @param resolution Secondary clustering resolution
 #' @param rare_ct Rare cell type detection method, available methods:`("a","m","none")`
 #' @param verbose Output clustering information
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import scater
 #' @import scry
+#'
 #' @export
+#'
+#' @examples
+#' TBD
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                     rtn_seurat = F, method="louvain", hly_cor = 0.9, hvg = 2000, cor_met = "PC",
                     use_glmpca = F, resolution = 1,
@@ -265,9 +272,9 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
   for(i in seq_len(nrow(cl_df))){
     idx <- which(seu_ls[[cl_df$sample[i]]]@meta.data[[cl_key]] == cl_df$cluster[i])
-    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx] %>%
+    if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] %>% # CH: change @data to counts
         as.matrix(.) %>% rowSums(.)/length(idx)
-    else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]@data[hvg_union,idx]
+    else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] # CH: change @data to counts
   }
 
   cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
@@ -411,12 +418,16 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 #' @param anno Annotation string
 #' @param cor_threshold Threshold for edge pruning in stage 1
 #' @param cl_key Column for clustering labels
+#'
 #' @return A list of Seurat Objects
-#' @examples
-#' # TBD
+#'
 #' @import scater
 #' @import scry
+#'
 #' @export
+#'
+#' @examples
+#' TBD
 assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
                          cl_key = "merged_cluster"){
   # Assign secondary clustering label
