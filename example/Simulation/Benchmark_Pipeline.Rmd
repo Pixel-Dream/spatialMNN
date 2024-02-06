@@ -1,0 +1,379 @@
+---
+title: "Benchmark"
+author: "Anonymous"
+date: "2023-10-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+source("~/GitHub/atlasClustering/example/Simulation/Simulation_func.R")
+
+options(future.globals.maxSize = 4000 * 1024^2)
+library(pryr)
+library(peakRAM)
+library(BayesSpace)
+library(mbkmeans)
+```
+
+## Simulation Benchmark
+for Memory&Time Comparison
+
+```{r }
+sample_num_seq <- c(2^c(1:4))
+bench_tml <- data.frame(sample_num = sample_num_seq,
+                        tic = 0,
+                        toc = 0,
+                        mem = -1,
+                        ari = -1,
+                        ari_var = -1)
+
+bench_res <- list("TSC" = bench_tml,
+                  "PRECAST" = bench_tml,
+                  "Seurat" = bench_tml,
+                  "BayesSpace" = bench_tml,
+                  "mbkmeans" = bench_tml)
+
+bench_res_ls <- list()
+
+# map_mat <- matrix(c(0.9,0.03,0.04,0.03,
+#                     0.2,0.6,0.05,0.15,
+#                     0.25,0.15,0.5,0.1,
+#                     0.1,0.1,0.1,0.7),nrow = 4, byrow = T)
+# 
+# map_mat <- matrix(c(1,0,0,0,
+#                     0,1,0,0,
+#                     0,0,1,0,
+#                     0,0,0,1),nrow = 4, byrow = T)
+# 
+map_mat <- matrix(c(0.9,0.1,0,0,
+                    0,0.9,0.05,0.05,
+                    0,0.05,0.95,0,
+                    0.1,0,0.1,0.8),nrow = 4, byrow = T)
+
+
+for(it in 1:5){
+  message(paste("Iter:",it))
+  for(i in seq_along(sample_num_seq)){
+    message(paste("Sample Num:",sample_num_seq[i]))
+    seu_ls <- my_sim(it=it, n_gene=200, noise = 0.2, ig_ratio=0.9, top_pcs = 4, map_mat = map_mat,
+                     n_sample = sample_num_seq[i], cell_max = 7, segmentation = F)
+    # Bench TSC
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seu_ls  <- stage_1(seu_ls ,find_HVG = F, top_pcs = 4, 
+                           cor_threshold = 0.6, edge_smoothing = T, nn = 6, 
+                           use_glmpca = T, verbose = T)
+
+        rtn_ls <- stage_2(seu_ls , cl_key = "merged_cluster",rtn_seurat = T,
+                          nn_2 = 2,method = "MNN",top_pcs = 4, use_glmpca = T, 
+                          rare_ct = "m", resolution = 1)
+        seu_ls  <- assign_label(seu_ls , rtn_ls$cl_df, "MNN", 
+                                cl_key = "merged_cluster",cor_threshold = 0.6)
+        toc <- Sys.time()
+      }
+    )
+    bench_res[["TSC"]]$tic[i] <- tic
+    bench_res[["TSC"]]$toc[i] <- toc
+    bench_res[["TSC"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
+    ari_vec <- sapply(seu_ls,function(seu_obj) mclust::adjustedRandIndex(seu_obj@meta.data[["sec_cluster_MNN"]], seu_obj@meta.data[["z"]]))
+    bench_res[["TSC"]]$ari[i] <- ari_vec %>% mean()
+    bench_res[["TSC"]]$ari_var[i] <- ari_vec %>% var()
+    # PRECAST
+    rm(rtn_ls)
+    gc()
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seuInt <- suppressMessages(PRECAST_test(seu_ls,k=4,gene_num = 800))
+        toc <- Sys.time()
+      }
+    )
+    gc()
+    bench_res[["PRECAST"]]$tic[i] <- tic
+    bench_res[["PRECAST"]]$toc[i] <- toc
+    bench_res[["PRECAST"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
+    ari_vec <- sapply(seq_along(seu_ls),function(i){
+      tmp_df <- data.frame(barcode = row.names(seuInt@meta.data) %>% 
+                             str_sub(start = 1, end = 18))
+      tmp_df[["PRECAST_4"]] <- seuInt@meta.data[["cluster"]]
+      tmp_df <- left_join(seu_ls[[names(seu_ls)[i]]]@meta.data[,c("barcode","layer")], 
+                          tmp_df[seuInt@meta.data[["batch"]]==i,], by="barcode")
+      mclust::adjustedRandIndex(tmp_df$layer, tmp_df$PRECAST_4)
+      
+    })
+    bench_res[["PRECAST"]]$ari[i] <- ari_vec %>% mean()
+    bench_res[["PRECAST"]]$ari_var[i] <- ari_vec %>% var()
+    rm(seuInt)
+    gc()
+    # Seurat
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seu_ls <- lapply(X = seu_ls, FUN = function(x) {
+          #x <- NormalizeData(x)
+          x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
+          })
+        features <- SelectIntegrationFeatures(object.list = seu_ls)
+        seu_ls <- lapply(X = seu_ls, FUN = function(x) {
+          x <- ScaleData(x, features = features, verbose = FALSE)
+          x <- RunPCA(x, features = features, verbose = FALSE)
+          })
+        anchors <- FindIntegrationAnchors(object.list = seu_ls, anchor.features = features, reduction = "rpca", verbose = F)
+        seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+        DefaultAssay(seu_combined) <- "integrated"
+    
+        # Run the standard workflow for visualization and clustering
+        seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+        seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+        seu_combined <- RunUMAP(seu_combined, reduction = "pca", dims = 1:10)
+        seu_combined <- FindNeighbors(seu_combined, reduction = "pca", dims = 1:10)
+        seu_combined <- FindClusters(seu_combined, resolution = 0.1)
+        toc <- Sys.time()
+      }
+    )
+    bench_res[["Seurat"]]$tic[i] <- tic
+    bench_res[["Seurat"]]$toc[i] <- toc
+    bench_res[["Seurat"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
+    
+    ari_vec <- sapply(seq_along(seu_ls),function(i){
+      mclust::adjustedRandIndex(seu_combined@meta.data[["seurat_clusters"]][seu_combined$batch == names(seu_ls)[i]], 
+                                seu_combined@meta.data[["layer"]][seu_combined$batch == names(seu_ls)[i]])
+      
+    })
+    bench_res[["Seurat"]]$ari[i] <- ari_vec %>% mean()
+    bench_res[["Seurat"]]$ari_var[i] <- ari_vec %>% var()
+    
+    #BayesSpace
+    sce <- SingleCellExperiment(assays=list(counts=seu_combined@assays[["RNA"]]@counts),
+                                rowData=NULL,
+                                colData=seu_combined@meta.data)
+    sce@assays@data@listData[["logcounts"]] <- sce@assays@data@listData[["counts"]]
+    rm(seu_combined)
+    gc()
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        sce <- spatialPreprocess(sce, platform="Visium",
+                             n.PCs=7, n.HVGs=800, log.normalize=FALSE)
+        #sce <- qTune(sce, qs=seq(2, 10), platform="ST", d=7)
+        #qPlot(sce)
+        
+        sce <- spatialCluster(sce, q=4, platform="Visium", d=7,
+                              init.method="mclust", model="t", gamma=2,
+                              nrep=1000, burn.in=100,
+                              save.chain=TRUE)
+        toc <- Sys.time()
+      }
+    )
+    bench_res[["BayesSpace"]]$tic[i] <- tic
+    bench_res[["BayesSpace"]]$toc[i] <- toc
+    bench_res[["BayesSpace"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
+    
+    ari_vec <- sapply(seq_along(seu_ls),function(i){
+      meta_df <- sce@colData@listData
+      mclust::adjustedRandIndex(meta_df$spatial.cluster[meta_df$batch == names(seu_ls)[i]], 
+                                meta_df$layer[meta_df$batch == names(seu_ls)[i]])
+      
+    })
+    bench_res[["BayesSpace"]]$ari[i] <- ari_vec %>% mean()
+    bench_res[["BayesSpace"]]$ari_var[i] <- ari_vec %>% var()
+  }
+  
+  bench_res_ls[[paste0("it_",it)]] <- bench_res
+  for(j in names(bench_res)){
+    write.csv(bench_res[[j]], paste0(j,"_",it,"_benchres.csv"))
+  }
+  message(paste("Iter:",it,"Done\n=============================="))
+}
+
+# mbkmeans
+
+for(it in 1:5){
+  message(paste("Iter:",it))
+  for(i in seq_along(sample_num_seq)){
+    message(paste("Sample Num:",sample_num_seq[i]))
+    seu_ls <- my_sim(it=it, n_gene=200, noise = 0.2, ig_ratio=0.9, top_pcs = 4, map_mat = map_mat,
+                     n_sample = sample_num_seq[i], cell_max = 7, segmentation = F)
+    merge_seu <- Reduce(function(x,y) merge(x,y,add.cell.ids = c(x@project.name,y@project.name)), seu_ls)
+    sce <- as.SingleCellExperiment(merge_seu)
+    rm(merge_seu)
+    gc()
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        res <- mbkmeans(sce, clusters = 4,
+                reduceMethod = NA,
+                whichAssay = "logcounts")
+        toc <- Sys.time()
+      }
+    )
+    bench_res[["mbkmeans"]]$tic[i] <- tic
+    bench_res[["mbkmeans"]]$toc[i] <- toc
+    bench_res[["mbkmeans"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
+    
+    ari_vec <- sapply(seq_along(seu_ls),function(i){
+      meta_df <- sce@colData@listData
+      mclust::adjustedRandIndex(meta_df$layer[meta_df$batch == names(seu_ls)[i]], 
+                                res[["Clusters"]][meta_df$batch == names(seu_ls)[i]])
+      
+    })
+    bench_res[["mbkmeans"]]$ari[i] <- ari_vec %>% mean()
+    bench_res[["mbkmeans"]]$ari_var[i] <- ari_vec %>% var()
+    rm(sce)
+    gc()
+  }
+  write.csv(bench_res[["mbkmeans"]], paste0("mbkmeans","_",it,"_benchres.csv"))
+}
+
+
+```
+
+```{r}
+# Simulated data
+plot_ls <- list()
+for(i in names(seu_ls)){
+  plot_ls[[i]] <- draw_slide_graph(seu_ls[[i]]@meta.data,NULL,NULL,"z") + NoLegend()
+}
+
+plot_ls <- list()
+plot_ls[["CELL_NUM1"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[1]]]@meta.data,NULL,NULL,"cell_num")
+plot_ls[["CELL_NUM2"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[2]]]@meta.data,NULL,NULL,"cell_num")
+plot_ls[["CELL_NUM3"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[3]]]@meta.data,NULL,NULL,"cell_num")
+plot_ls[["CELL_NUM4"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[4]]]@meta.data,NULL,NULL,"cell_num")
+plot_ls[["cell_type1_1"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[1]]]@meta.data,NULL,NULL,"Celltype_1")
+plot_ls[["cell_type1_2"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[2]]]@meta.data,NULL,NULL,"Celltype_1")
+plot_ls[["cell_type1_3"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[3]]]@meta.data,NULL,NULL,"Celltype_1")
+plot_ls[["cell_type1_4"]] <- draw_slide_graph(seu_ls[[names(seu_ls)[4]]]@meta.data,NULL,NULL,"Celltype_1")
+plot_ls[["heatmap_1"]] <- DoHeatmap(seu_ls[[names(seu_ls)[1]]], features = row.names(seu_ls[[1]])[c(1:5,201:205,401:405,601:605,801:805)], group.by = "layer")
+plot_ls[["heatmap_2"]] <- DoHeatmap(seu_ls[[names(seu_ls)[2]]], features = row.names(seu_ls[[1]])[c(1:5,201:205,401:405,601:605,801:805)], group.by = "layer")
+plot_ls[["heatmap_3"]] <- DoHeatmap(seu_ls[[names(seu_ls)[3]]], features = row.names(seu_ls[[1]])[c(1:5,201:205,401:405,601:605,801:805)], group.by = "layer")
+plot_ls[["heatmap_4"]] <- DoHeatmap(seu_ls[[names(seu_ls)[4]]], features = row.names(seu_ls[[1]])[c(1:5,201:205,401:405,601:605,801:805)], group.by = "layer")
+
+ggarrange(plotlist = plot_ls, ncol = 4, nrow = 3)
+
+# TSC 
+plot_ls <- list()
+for(sample_id in names(seu_ls)){
+  plot_ls[[sample_id]] <- seu_ls[[sample_id]]@misc[["graph_plot_cluster_sec_MNN"]]
+}
+
+ggarrange(plotlist = plot_ls, ncol = 2, nrow = 2)
+
+
+
+# PRECAST Visualize
+cols_cluster <- chooseColors(palettes_name = "Hue n", n_colors = 4, plot_colors = F)
+pList <- SpaPlot(seuInt, item = "cluster", batch = NULL, point_size = 1, cols = cols_cluster, combine = FALSE,
+    nrow.legend = 7)
+drawFigs(pList, layout.dim = c(2, 2), common.legend = TRUE, legend.position = "right", align = "hv")
+
+ggplot(seu_ls$lnr_4@meta.data,aes(x = row, y = col, color = z)) + 
+  geom_point()
+
+
+# Seurat Visualize
+plot_ls <- list()
+for(i in levels(seu_combined$batch %>% as.factor())){
+  plot_ls[[i]] <- ggplot(seu_combined@meta.data %>% subset(batch==i), aes(x = col, y = row, color = seurat_clusters)) + 
+    geom_point() +
+    labs(title = i) +
+    theme_classic() #+ NoLegend()
+}
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 2)
+
+DoHeatmap(seu_combined,
+          features = paste0("gene-",c(1:10,201:210,401:410,601:610,801:810)),group.by = "z")
+
+seu_combined@meta.data[["seurat_cl_z"]] <- paste(seu_combined@meta.data[["z"]],
+                                                 #seu_combined@meta.data[["batch"]],
+                                                 seu_combined@meta.data[["seurat_clusters"]],sep = "_")
+DoHeatmap(seu_combined,
+          features = paste0("gene-",c(1:10,201:210,401:410,601:610,801:810)),group.by = "seurat_cl_z")
+DoHeatmap(seu_combined,
+          features = paste0("gene-",c(1:10,201:210,401:410,601:610,801:810)),group.by = "seurat_cl_z",assay = "RNA", slot = "count") + 
+  scale_fill_gradientn(limits = c(min(seu_combined@assays$RNA@counts), max(seu_combined@assays$RNA@counts)),
+                       colors = c("white","red"), na.value = "white")
+
+#BayesSpace
+plot_ls <- lapply(names(seu_ls),function(i){
+      meta_df <- sce@colData@listData %>% as.data.frame()
+      ggplot(meta_df[meta_df$batch==i,], aes(x = col, y = row, color = as.factor(spatial.cluster))) + 
+        geom_point() +
+        labs(title = i) +
+        theme_classic() 
+    })
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 2)
+
+
+plot_ls <-list()
+# Optional load .csv results
+bench_res_ls <- list()
+for(i in 1:5){
+  for(method in c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans")){
+    bench_res_ls[[paste0(method,"_",i)]] <- read.csv(paste0(method,"_",i,"_benchres.csv"))
+  }
+} 
+
+bench_res_df <- do.call(rbind.data.frame,bench_res_ls) %>%
+  mutate(Method = rep(c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans"),each = 4,times=5),
+         Memory = mem/1024,
+         TimeElapsed =  (toc-tic)/60)
+  
+# from running results
+bench_res_df <- lapply(bench_res_ls,function(x)do.call(rbind.data.frame,x)) %>%  
+  do.call(rbind.data.frame,.) %>%
+  mutate(Method = rep(c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans"),each = 4,times=length(bench_res_ls)),
+         Memory = mem/1024,
+         TimeElapsed =  (toc-tic)/60)
+
+bench_res_summ <- bench_res_df %>% group_by(sample_num,Method) %>% 
+  summarise(mean_ARI = mean(ari),
+            mean_Time = mean(TimeElapsed),
+            mean_Mem = mean(Memory),
+            sd_ARI = sd(ari),
+            sd_Time = sd(TimeElapsed),
+            sd_Mem = sd(Memory))
+#bench_res_df <- bench_res_df[1:11,]
+library(ggforce)
+plot_ls[["ARI"]] <- ggplot(bench_res_df,aes(x = as.factor(sample_num), y = ari, fill=Method)) + 
+    geom_boxplot() + 
+    labs(title = "ARI") + xlab("Sample Num") + 
+    theme_classic()
+
+plot_ls[["ARI_summ"]] <- ggplot(bench_res_summ,
+                                aes(x = as.factor(sample_num), y = mean_ARI, color = Method, group = Method,
+                                    ymin = mean_ARI-sd_ARI, ymax = mean_ARI+sd_ARI)) + 
+  geom_errorbar(width = 0.2) +
+  geom_line() +
+  geom_point(color = "black") +
+  labs(title = "ARI Summary") + ylab("ARI") + xlab("Sample Num") + 
+  theme_classic()
+  
+    
+plot_ls[["Mem_summ"]] <- ggplot(bench_res_summ,
+                                aes(x = as.factor(sample_num), y = mean_Mem, color = Method, group = Method,
+                                    ymin = mean_Mem-sd_Mem, ymax = mean_Mem+sd_Mem)) + 
+  geom_errorbar(width = 0.2) +
+  geom_line() +
+  geom_point(color = "black") +
+  labs(title = "Memory Summary") + ylab("Memory (GB)") + xlab("Sample Num") + 
+  theme_classic() #+ facet_zoom(ylim = c(0, 20))
+  
+plot_ls[["Time_summ"]] <- ggplot(bench_res_summ,
+                                aes(x = as.factor(sample_num), y = mean_Time, color = Method, group = Method,
+                                    ymin = mean_Time-sd_Time, ymax = mean_Time+sd_Time)) + 
+  geom_errorbar(width = 0.2) +
+  geom_line() +
+  geom_point(color = "black") +
+  labs(title = "Time Summary")+ylab("Time (min)") + xlab("Sample Num") + 
+  theme_classic()
+
+
+ggarrange(plotlist = plot_ls,nrow = 1,ncol = 4)
+
+```
