@@ -8,6 +8,11 @@
 *.rds
 .RDataTmp
 
+# Exported PDFs
+*.pdf
+*.jpg
+*.png
+
 # User-specific files
 .Ruserdata
 
