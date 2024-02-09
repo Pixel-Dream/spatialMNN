@@ -277,8 +277,13 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] # CH: change @data to counts
   }
 
-  cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
-  cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
+  #cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
+  #cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
+  #cl_expr_obj <- ScaleData(cl_expr_obj, features = rownames(cl_expr_obj),verbose = F)
+  cl_expr_obj <- CreateSeuratObject(t(cl_expr))
+  cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg, verbose = F)
+  cl_expr_obj <- NormalizeData(cl_expr_obj, verbose = F)
+  cl_expr_obj@assays[["RNA"]]@layers[["data"]] <- cl_expr_obj@assays[["RNA"]]@layers[["counts"]]
   cl_expr_obj <- ScaleData(cl_expr_obj, features = rownames(cl_expr_obj),verbose = F)
   cl_expr_obj <- RunPCA(cl_expr_obj, features = VariableFeatures(object = cl_expr_obj),verbose = F)
   cl_expr_obj <- RunUMAP(cl_expr_obj, dims = 1:top_pcs,verbose = F)

@@ -52,6 +52,13 @@ map_mat <- matrix(c(0.9,0.1,0,0,
                     0,0.05,0.95,0,
                     0.1,0,0.1,0.8),nrow = 4, byrow = T)
 
+ggplot(data.frame(Region = rep(paste0("Region_",1:4),4),
+                  CellType = rep(paste0("CellType_",1:4),each = 4),
+                  Ratio = as.numeric(map_mat)*100),
+       aes(x = Region, fill = CellType, y = Ratio)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic()
+  
 
 for(it in 1:5){
   message(paste("Iter:",it))
@@ -59,6 +66,15 @@ for(it in 1:5){
     message(paste("Sample Num:",sample_num_seq[i]))
     seu_ls <- my_sim(it=it, n_gene=200, noise = 0.2, ig_ratio=0.9, top_pcs = 4, map_mat = map_mat,
                      n_sample = sample_num_seq[i], cell_max = 7, segmentation = F)
+    if(F){
+      plot_ls <- list()
+      for(sample_id in names(seu_ls)){
+       plot_ls[[sample_id]] <- ggplot() + geom_scatterpie(aes(x=coord_y, y=coord_x, group=layer, size = cell_num),
+                                      data=seu_ls[[sample_id]]@meta.data,
+                           cols=paste0("Celltype_",1:4)) + coord_equal()
+      }
+      
+    }
     # Bench TSC
     mem_usage <- peakRAM(
       {
@@ -317,7 +333,7 @@ for(i in 1:5){
   for(method in c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans")){
     bench_res_ls[[paste0(method,"_",i)]] <- read.csv(paste0(method,"_",i,"_benchres.csv"))
   }
-} 
+}
 
 bench_res_df <- do.call(rbind.data.frame,bench_res_ls) %>%
   mutate(Method = rep(c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans"),each = 4,times=5),
