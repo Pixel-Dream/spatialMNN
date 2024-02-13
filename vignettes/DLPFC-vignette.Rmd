@@ -24,6 +24,9 @@ library(ggnewscale) # for new_scale_colour()
 library(igraph)
 library(scry)
 library(scater)
+# set seed
+set.seed(12345)
+
 ```
 
 
