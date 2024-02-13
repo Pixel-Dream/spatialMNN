@@ -3,12 +3,12 @@
 #'
 #' @param seu_ls A list of Seurat Objects, columns `coord_x,coord_y` must be included in the `meta.data`
 #' @param cor_threshold Threshold for edge pruning
-#' @param nn Number of NN for graph building
+#' @param nn Number of nearest neighbors for graph building
 #' @param nn_2 For SNN correlation only
 #' @param cl_resolution Louvain resolution for clustering
 #' @param top_pcs Number of selected top PCs
 #' @param cl_min Minimal nodes in identified niches
-#' @param find_HVG Whether find HVG for downstream analysis or use full gene list
+#' @param find_HVG Whether to find HVG for downstream analysis or use full gene list
 #' @param hvg HVG numbers, default: `2000`
 #' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param edge_smoothing Perform smoothed edge detection
@@ -26,23 +26,32 @@
 #'
 #' @examples
 #' TBD
+#'
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, verbose = F){
+
   tic <- Sys.time()
+
   for(i in names(seu_ls)){
     #seu_ls[[i]] <- NormalizeData(seu_ls[[i]], normalization.method = "LogNormalize", scale.factor = 10000,verbose = F)
+    # QC
     stopifnot("Not supported Cor Calc Method" = cor_met %in% c("PC","HVG","SNN"))
+
+    # Find or grab HVGs
     if(find_HVG){
       stopifnot("HVG# Exceeded" = hvg <= nrow(seu_ls[[i]]))
+      # find HVG for each object
       seu_ls[[i]] <- FindVariableFeatures(seu_ls[[i]], selection.method = "vst", nfeatures = hvg,verbose = F)
     }else{
+      # grab HVG features
       VariableFeatures(object = seu_ls[[i]]) <- row.names(seu_ls[[i]])
       hvg <- nrow(seu_ls[[i]])
     }
 
-
+    # Use glmPCA or normal PCA on data
     if(use_glmpca == T){
+      # grab counts data
       mat <- as.matrix(seu_ls[[i]]@assays$RNA$counts[VariableFeatures(object = seu_ls[[i]]),]) # CH: changed @ to $ before "counts"
       mat <- nullResiduals(mat, type="deviance")
       PCA_res <- suppressWarnings(calculatePCA(mat,ncomponents = top_pcs, scale = TRUE, BSPARAM = BiocSingular::RandomParam()))
@@ -56,9 +65,11 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
       PCA_res <- seu_ls[[i]]@reductions[["pca"]]@cell.embeddings
     }
 
+    # find distance matrix
     dist_knn <- dbscan::kNN(seu_ls[[i]]@meta.data %>% select(coord_x,coord_y),k=nn)
     if(cor_met == "SNN") expr_knn <- dbscan::kNN(PCA_res[,1:top_pcs],k=nn_2)
 
+    # Perform edge smoothing
     if(!edge_smoothing){
       seq_vec <- seq_len(ncol(seu_ls[[i]]))
       if(cor_met == "SNN"){
@@ -78,7 +89,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
         cor_mat[is.na(cor_mat)] <- 0
       }
       else{
-        if(cor_met == "PC") cor_mat <- cor(t(as.matrix(PCA_res[,1:top_pcs])),method = "pearson")
+        if(cor_met == "PC") cor_mat <- cor(t(as.matrix(PCA_res[,1:top_pcs])), method = "pearson")
         else if(cor_met == "HVG") cor_mat <- cor(seu_ls[[i]]@assays[["RNA"]]@scale.data[VariableFeatures(object = seu_ls[[i]]),],method = "pearson")
 
         for(j in seq_vec){
@@ -126,7 +137,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
     }
 
 
-
+    # get adjacency matrix
     g <- igraph::graph.adjacency(cor_mat, mode = "directed",
                          weighted = TRUE, diag = TRUE)
 
@@ -137,7 +148,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
 
     # Primary Clustering
     cor_mat[cor_mat < cor_threshold] <- 0
-    g <- graph.adjacency(cor_mat, mode = "directed",
+    g <- igraph::graph.adjacency(cor_mat, mode = "directed",
                          weighted = TRUE, diag = TRUE)
     g <- as.undirected(g,mode = "mutual")
 
@@ -146,6 +157,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
                        cor_threshold,"layer")
 
+    # Louvain clustering
     cl_res <- cluster_louvain(g, resolution = cl_resolution)
     seu_ls[[i]]@meta.data[["cluster"]] <- as.factor(cl_res$membership)
 
@@ -170,54 +182,55 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
       if(verbose) message(paste(i,"merged cluster number:",length(levels(seu_ls[[i]]@meta.data[["merged_cluster"]]))))
     }
 
-
     seu_ls[[i]]@misc[["graph_plot_cluster_merged"]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
                        cor_threshold,"merged_cluster") + theme(legend.position = "none")
-
   }
 
   toc <- Sys.time()
+
   if(verbose){
     message("Elasped Time:")
     message(format(difftime(toc, tic, units='secs'),digits = 3))
   }
-
   seu_ls
 }
 
 
+# COMMENT for now cause these should be good in utils
 
-mat_cor <- function(mat_x, mat_y){
-  cor_mat <- matrix(0,nrow = nrow(mat_x),ncol = nrow(mat_y))
-  for(i in seq_len(nrow(mat_x))){
-    cor_mat[i,] <- sapply(seq_len(nrow(mat_y)),
-                          function(x){
-                            cor(x=mat_x[i,],y=mat_y[x,],method = "pearson")
-                          })
-  }
-  row.names(cor_mat) <- row.names(mat_x)
-  colnames(cor_mat) <- row.names(mat_y)
-  cor_mat
-}
+# mat_cor <- function(mat_x, mat_y){
+#   cor_mat <- matrix(0,nrow = nrow(mat_x),ncol = nrow(mat_y))
+#   for(i in seq_len(nrow(mat_x))){
+#     cor_mat[i,] <- sapply(seq_len(nrow(mat_y)),
+#                           function(x){
+#                             cor(x=mat_x[i,],y=mat_y[x,],method = "pearson")
+#                           })
+#   }
+#   row.names(cor_mat) <- row.names(mat_x)
+#   colnames(cor_mat) <- row.names(mat_y)
+#   cor_mat
+# }
+#
+# louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
+#   for(j in seq_len(nrow(cor_mat_))){
+#     not_nn_vec <- sort(cor_mat_[,j],decreasing = T)[(nn_+2):ncol(cor_mat_)] %>% names()
+#     cor_mat_[j,not_nn_vec] <- 0
+#     cor_mat_[j,j] <- 0
+#   }
+#   g <- graph.adjacency(cor_mat_, mode = "directed",
+#                        weighted = TRUE, diag = TRUE)
+#   g <- as.undirected(g,mode = "mutual")
+#
+#   louvain_res <- cluster_louvain(g, resolution = res_)
+#   louvain_res
+# }
 
-louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
-  for(j in seq_len(nrow(cor_mat_))){
-    not_nn_vec <- sort(cor_mat_[,j],decreasing = T)[(nn_+2):ncol(cor_mat_)] %>% names()
-    cor_mat_[j,not_nn_vec] <- 0
-    cor_mat_[j,j] <- 0
-  }
-  g <- graph.adjacency(cor_mat_, mode = "directed",
-                       weighted = TRUE, diag = TRUE)
-  g <- as.undirected(g,mode = "mutual")
-
-  louvain_res <- cluster_louvain(g, resolution = res_)
-  louvain_res
-}
 
 #' Integrative Clustering
 #'
 #' Main function 2
+#'
 #' @param seu_ls A list of Seurat Objects from `stage_1` output
 #' @param nn_2 MNN parameter
 #' @param top_pcs Number of selected top PCs
@@ -241,17 +254,21 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #'
 #' @examples
 #' TBD
+#'
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                     rtn_seurat = F, method="louvain", hly_cor = 0.9, hvg = 2000, cor_met = "PC",
                     use_glmpca = F, resolution = 1,
                     rare_ct="none", verbose = F){
+
   tic <- Sys.time()
   hvg_union <- c()
   gene_intersect <- row.names(seu_ls[[names(seu_ls)[1]]])
   cl_num <- c()
 
+  # QC
   stopifnot("Not supported Cor Calc Method" = cor_met %in% c("PC","HVG"))
 
+  # Grab hvgs, genes, and cluster data
   for(i in names(seu_ls)){
     hvg_union <- union(hvg_union,VariableFeatures(object = seu_ls[[i]]))
     gene_intersect <- intersect(gene_intersect, row.names(seu_ls[[i]]))
@@ -260,7 +277,6 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   }
 
   hvg_union <- intersect(hvg_union, gene_intersect)
-
   cl_expr <- matrix(0, nrow = sum(cl_num),ncol = length(hvg_union))
   cl_df <- data.frame(sample=rep(names(seu_ls),cl_num),cluster=0)
 
@@ -270,6 +286,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   row.names(cl_expr) <- paste0("X",cl_df$sample,"_",cl_df$cluster)
   colnames(cl_expr) <- hvg_union
 
+  # Grab count data for desired genes
   for(i in seq_len(nrow(cl_df))){
     idx <- which(seu_ls[[cl_df$sample[i]]]@meta.data[[cl_key]] == cl_df$cluster[i])
     if(length(idx)>1) cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] %>% # CH: change @data to counts
@@ -277,11 +294,14 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] # CH: change @data to counts
   }
 
-  cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
+  # create Seurat object and run methods
+  cl_expr_obj <- CreateSeuratObject(CreateAssayObject(t(cl_expr)),verbose = F)
   cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
   cl_expr_obj <- ScaleData(cl_expr_obj, features = rownames(cl_expr_obj),verbose = F)
   cl_expr_obj <- RunPCA(cl_expr_obj, features = VariableFeatures(object = cl_expr_obj),verbose = F)
   cl_expr_obj <- RunUMAP(cl_expr_obj, dims = 1:top_pcs,verbose = F)
+
+  # run glpPCA
   if(use_glmpca){
     mat <- as.matrix(cl_expr_obj@assays$RNA@counts[VariableFeatures(object = cl_expr_obj),])
     mat <- nullResiduals(mat, type="deviance")
@@ -290,17 +310,21 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     #cl_expr_obj@reductions[["pca"]]@feature.loadings <- gp_res$loadings %>% as.matrix()
   }
 
+  # run louvain or MNN clustering
   if(method == "louvain"){
     if(cor_met == "PC"){
       cor_mat <- cor(t(as.matrix(cl_expr_obj@reductions[["pca"]]@cell.embeddings[,1:top_pcs])),method = "pearson")
     }else if(cor_met == "HVG") cor_mat <- cor(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj),],method = "pearson")
 
+    # louvain
     louvain_res <- louvain_w_cor(cor_mat)
     #table(louvain_res$membership)
     cl_df[["louvain"]] <- as.character(louvain_res$membership)
     sml_cl_idx <- names(table(cl_df[["louvain"]]))[table(cl_df[["louvain"]]) < 2]
     cl_df[["louvain"]][cl_df[["louvain"]] %in% sml_cl_idx] <- NA
+
   }else if(method == "MNN"){
+
     g <- make_empty_graph(directed = F)
     node_df <- data.frame(ID=seq_along(colnames(cl_expr_obj)),
                           cl = colnames(cl_expr_obj),
@@ -336,7 +360,6 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
           mat_j <- as.matrix(cl_expr_obj@assays[["RNA"]]@scale.data[VariableFeatures(object = cl_expr_obj), idx_j]) %>% t()
         }
 
-
         cor_mat <- mat_cor(mat_i,mat_j)
         hly_cor_mat <- cor_mat > hly_cor
         i_nn_mat <- matrix(0,nrow = nrow(mat_i),ncol = nrow(mat_j))
@@ -360,9 +383,9 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
           }
         }
         g <- add.edges(g,edges = edge_vec)
-
       }
     }
+
     louvain_res <- cluster_louvain(g, resolution = resolution)
 
     cl_df[["louvain"]] <- as.character(louvain_res$membership)
@@ -389,6 +412,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 
   }
 
+  # Apply UMAP
   cl_df[["umap_1"]] <- cl_expr_obj@reductions[["umap"]]@cell.embeddings[,1]
   cl_df[["umap_2"]] <- cl_expr_obj@reductions[["umap"]]@cell.embeddings[,2]
   cl_df[["layer"]] <- apply(cl_df,1,
@@ -398,6 +422,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                               table(layer_vec) %>% sort(decreasing = T) %>% names() %>% .[1]
 
                             })
+
   toc <- Sys.time()
   message("Elasped Time(sec):")
   message(toc - tic)
@@ -428,6 +453,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 #'
 #' @examples
 #' TBD
+#'
 assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
                          cl_key = "merged_cluster"){
   # Assign secondary clustering label
@@ -443,3 +469,10 @@ assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
   }
   seu_ls
 }
+
+
+# What is rare cell types mean?
+# Where is randomness coming into play? Each time I run is different results
+# What is BayesSpace Intergration for? is it needed now?
+# Do we need plotting functions?
+
