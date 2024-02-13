@@ -25,6 +25,7 @@ library(igraph)
 library(scry)
 library(scater)
 # set seed
+set.seed(12345)
 
 ```
 
