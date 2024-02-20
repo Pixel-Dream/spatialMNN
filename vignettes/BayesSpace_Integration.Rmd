@@ -16,6 +16,8 @@ library(scater)
 
 ## Run BayesSpace with 12 samples
 
+# Bayespace on 12 tissues, multisample analysis to link clusters between samples
+
 ```{r }
 ehub <- ExperimentHub::ExperimentHub()
 ## Download the small example sce data

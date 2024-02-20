@@ -101,7 +101,6 @@ spe2SeuList <- function(spe,
 #'
 #' @import igraph
 #'
-#' @export
 #'
 #' #' @examples
 #' # No Example
@@ -132,7 +131,6 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #'
 #' @import igraph
 #'
-#' @export
 #'
 #' #' @examples
 #' # No Example

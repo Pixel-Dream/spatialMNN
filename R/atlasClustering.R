@@ -242,7 +242,7 @@ stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution
 #' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param use_glmpca Use GLMPCA or regular PCA
 #' @param resolution Secondary clustering resolution
-#' @param rare_ct Rare cell type detection method, available methods:`("a","m","none")`
+#' @param rare_ct Rare cell type detection method, available methods:`("a","m","none")` # a = another round of clustering for small niches, m = enable MM within each sample
 #' @param verbose Output clustering information
 #'
 #' @return A list of Seurat Objects
@@ -298,9 +298,6 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   # create Seurat object and run methods
   cl_expr_obj <- CreateSeuratObject(CreateAssayObject(t(cl_expr)),verbose = F)
   cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
-
-  cl_expr_obj <- CreateSeuratObject(t(cl_expr))
-  cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg, verbose = F)
   cl_expr_obj <- NormalizeData(cl_expr_obj, verbose = F)
   cl_expr_obj@assays[["RNA"]]@layers[["data"]] <- cl_expr_obj@assays[["RNA"]]@layers[["counts"]]
 
@@ -477,9 +474,4 @@ assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
   seu_ls
 }
 
-
-# What is rare cell types mean?
-# Where is randomness coming into play? Each time I run is different results
-# What is BayesSpace Intergration for? is it needed now?
-# Do we need plotting functions?
 
