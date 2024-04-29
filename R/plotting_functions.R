@@ -6,16 +6,17 @@
 #'
 #' @return A Heatmap-class object.
 #'
+#' @import ComplexHeatmap
+#' @import circlize
+#'
 #' @export
 #'
 #' @examples
 #' x_ <- sample(1:4,100,replace = T)
 #' y_ <- sample(1:5,100,replace = T)
 #' plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
-
+#'
 plotConfusionMatrix <- function(x,y,col_title = ""){
-  require(ComplexHeatmap)
-  require(circlize)
   na_index <- (is.na(x) | is.na(y))
   x <- x[!na_index]
   y <- y[!na_index]
@@ -35,6 +36,7 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
           col = colorRamp2(seq(0, 1,length.out=5), viridis::viridis(5)),
           rect_gp = gpar(col = "white", lwd = 1),column_title = col_title)
 }
+
 
 
 #' Plot SRT Slide
