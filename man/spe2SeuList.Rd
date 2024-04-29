@@ -29,6 +29,3 @@ A list of Seurat Objects
 \description{
 Convert spatialExperiment object to a list of Seurat objects based on sample id
 }
-\examples{
-# No Example
-}

@@ -12,6 +12,7 @@
 *.pdf
 *.jpg
 *.png
+*.csv
 
 # User-specific files
 .Ruserdata

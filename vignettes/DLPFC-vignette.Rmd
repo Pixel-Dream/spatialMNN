@@ -24,6 +24,7 @@ library(ggnewscale) # for new_scale_colour()
 library(igraph)
 library(scry)
 library(scater)
+options(future.globals.maxSize = 4000 * 1024^2)
 ```
 
 
@@ -86,3 +87,180 @@ message(paste0("Sample\tARI:\n",paste(names(seurat_ls),'\t',format(ari_vec,digit
 
 mean(ari_vec)
 ```
+## Combined Anlysis
+
+```{r }
+seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+          x <- NormalizeData(x)
+          x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
+})
+features <- SelectIntegrationFeatures(object.list = seurat_ls)
+seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+  x <- ScaleData(x, features = features, verbose = FALSE)
+  x <- RunPCA(x, features = features, verbose = FALSE)
+  })
+anchors <- FindIntegrationAnchors(object.list = seurat_ls, anchor.features = features, reduction = "rpca", verbose = F)
+seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+DefaultAssay(seu_combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+# Save combined obj
+saveRDS(seu_combined,file = "DLPFC_cl_combined.RDS")
+
+```
+
+### corrleation
+```{r}
+set.seed(2024)
+sample_index <- sample(1:ncol(seu_combined),2500)
+sample_expr_mat <- as.matrix(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),sample_index])
+
+cor_mat <- cor(sample_expr_mat)
+sample_cl <- seu_combined$sec_cluster_MNN[sample_index]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+
+
+expr_mat <- as.matrix(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == "spe_151675"])
+
+cor_mat <- cor(expr_mat)
+sample_cl <- seu_combined$sec_cluster_MNN[seu_combined$orig.ident == "spe_151675"]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+sample_cl <- seu_combined$layer[seu_combined$orig.ident == "spe_151675"]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+# Sample/Cluster Averaged Heatmap
+cor_mat <- (length(levels(as.factor(seu_combined$orig.ident)))*length(levels(as.factor(seu_combined$sec_cluster_MNN)))) %>% 
+  matrix(0, ncol = ., nrow = .)
+sample_vec <- levels(as.factor(seu_combined$orig.ident))
+cl_vec <- levels(as.factor(seu_combined$sec_cluster_MNN))
+for(li in seq_along(sample_vec)){
+  for(lj in seq_along(cl_vec)){
+    message(paste("sample:",sample_vec[li],", Cluster:",cl_vec[lj]))
+    for(ui in seq_along(sample_vec)){
+      for(uj in seq_along(cl_vec)){
+        if(uj+(ui-1)*length(cl_vec) > lj+(li-1)*length(cl_vec)){
+          
+          cor_mat[lj+(li-1)*length(cl_vec),uj+(ui-1)*length(cl_vec)] <- 
+            cor(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == sample_vec[li] & seu_combined$sec_cluster_MNN == cl_vec[lj]] %>% rowMeans(),
+                seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == sample_vec[ui] & seu_combined$sec_cluster_MNN == cl_vec[uj]] %>% rowMeans())
+        }else{
+          cor_mat[lj+(li-1)*length(cl_vec),uj+(ui-1)*length(cl_vec)] <- cor_mat[uj+(ui-1)*length(cl_vec),lj+(li-1)*length(cl_vec)]
+        }
+      }
+    }
+  }
+}
+for(li in 1:nrow(cor_mat)) cor_mat[li,li] <- 1
+
+Heatmap(cor_mat,
+        top_annotation = 
+          HeatmapAnnotation(sample = rep(sample_vec,each = length(cl_vec)),
+                            cluster = rep(cl_vec, length(sample_vec)),
+                            col = list(sample = RColorBrewer::brewer.pal(length(sample_vec),"Paired") %>% `names<-`(sample_vec),
+                                       cluster = RColorBrewer::brewer.pal(length(cl_vec),"Set1") %>% `names<-`(cl_vec) )),
+        show_column_names = F, show_row_names = F)
+```
+
+### Findmarkers
+
+```{r}
+Idents(seu_combined) <- seu_combined@meta.data[["sec_cluster_MNN"]]
+marker_ls <- FindAllMarkers(seu_combined)
+
+go_ls <- list()
+
+
+library(gprofiler2)
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  message(i)
+  go_ls[[paste0("cl_",i)]] <- gost(query = marker_ls$gene[marker_ls$cluster == i & marker_ls$avg_log2FC > 0], organism = "hsapiens")
+}
+
+plot_ls <- list()
+
+
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(go_ls[[paste0("cl_",i)]][["result"]] %>% subset(source == "GO:BP") %>% 
+                                         arrange(desc(p_value)) %>% 
+                                         mutate(term_name = factor(.$term_name, levels = .$term_name)),
+       aes(x = term_name, y = -log10(p_value))) +
+    geom_bar(stat = "identity") + coord_flip() + 
+    labs(title = paste("Cluster",i)) +
+    theme_classic()
+}
+
+
+all_markers <- FindAllMarkers(seu_combined,logfc.threshold = 0)
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(all_markers %>% subset(cluster == i & pct.1 > 0.1 & pct.2 > 0.1) %>% 
+                                         mutate(de = ifelse(p_val_adj < 0.01 & abs(avg_log2FC) > 0.1,ifelse(avg_log2FC > 0,"UP","DOWN"),"NO")),
+       aes(x = avg_log2FC, y = -log10(p_val_adj), color = de)) +
+    geom_point() +
+    labs(title = paste("Cluster",i)) +
+    scale_color_manual(values = c("UP" = "green", "DOWN" = "red","NO" = "grey")) +
+    theme_classic()
+}
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 4)
+```
+## Pseudobulk
+
+```{r }
+avg_expr_mat <- matrix(0,nrow=nrow(seu_combined@assays[["RNA"]]@data), ncol = length(cl_vec)*length(sample_vec)) %>%
+  `row.names<-`(row.names(seu_combined@assays[["RNA"]]@data)) %>% 
+  `colnames<-`(paste(rep(sample_vec,each=length(cl_vec)),rep(cl_vec,length(sample_vec)),sep = "_"))
+  
+for(i in sample_vec){
+  for(j in cl_vec){
+    avg_expr_mat[,paste0(i,"_",j)] <- rowMeans(seu_combined@assays[["RNA"]]@counts[,seu_combined$sec_cluster_MNN == j & seu_combined$orig.ident == i])
+  }
+}
+library(DESeq2)
+
+
+avg_expr_mat <- round(avg_expr_mat*1000)
+avg_expr_mat_filter <- avg_expr_mat[rowSums(avg_expr_mat) >= 10,]
+de_res <- list()
+
+for(i in levels(as.factor(cl_vec))){
+  message(paste("cluster",i))
+  col_data <- data.frame(sample = rep(sample_vec,each=length(cl_vec)),
+                       cluster = rep(cl_vec,length(sample_vec))==i  )
+  dds <- DESeqDataSetFromMatrix(countData = avg_expr_mat_filter,
+                              colData = col_data,
+                              design = ~ cluster)
+
+  #Filter
+  dds <- dds[rowSums(counts(dds)) >= 10,]
+
+  #DE
+  dds <- DESeq(dds)
+  de_res[[paste0("cl_",i)]] <- results(dds)
+}
+
+# Volcano Plot
+for(i in levels(as.factor(cl_vec))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(as.data.frame(de_res[[paste0("cl_",i)]]) %>% 
+                                         mutate(de = ifelse(padj < 0.01 & abs(log2FoldChange) > 0.5,ifelse(log2FoldChange > 0,"UP","DOWN"),"NO")),
+       aes(x = log2FoldChange, y = -log10(padj), color = de)) +
+    geom_point() +
+    labs(title = paste("Cluster",i)) +
+    scale_color_manual(values = c("UP" = "green", "DOWN" = "red","NO" = "grey")) +
+    theme_classic()
+}
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 4)
+
+
+```
+
+## Save results
+
+```{r}
+saveRDS(seu_combined,file = "DLPFC_combined_seu_obj.RDS")
+saveRDS(all_markers,file = "DLPFC_combined_de_res.RDS")
+
+```
+
+

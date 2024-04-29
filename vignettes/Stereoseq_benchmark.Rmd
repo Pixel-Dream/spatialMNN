@@ -1,0 +1,121 @@
+---
+title: "Stereo-seq_benchmark"
+author: "Anonymous"
+date: "2024-04-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+library(spatialLIBD)
+library(Seurat)
+library(magrittr)
+library(tidyverse)
+library(ggnewscale) # for new_scale_colour()
+library(igraph)
+library(scry)
+library(scater)
+library(parallel)
+library(rhdf5)
+library(ggpubr)
+options(future.globals.maxSize = 4000 * 1024^2)
+```
+
+
+
+```{r}
+h5_path = "G:/projects_bk/stereoseq/Mouse_embryo_all_stage.h5ad"
+h5ls(h5_path)
+meta_ls <- h5read(h5_path,"obs")
+spatial_ls <- h5read(h5_path,"obsm")
+
+meta_df <- as.data.frame(meta_ls[-1]) %>% 
+  mutate(annotation = meta_ls$`__categories`$annotation[annotation+1] %>% 
+           as.factor(),
+         timepoint = meta_ls$`__categories`$timepoint[timepoint+1] %>% 
+           as.factor(),
+         coord_x = spatial_ls[["spatial"]][1,],
+         coord_y = spatial_ls[["spatial"]][2,]) 
+
+X_ls  <- h5read(h5_path,"X")
+expr_mat <- Matrix::sparseMatrix(index1 = F,
+                                 i = as.numeric(X_ls$indices),
+                                 p = as.numeric(X_ls$indptr),
+                                 x = as.numeric(X_ls$data), dims = c(23761, 520815))
+
+gene_name <- h5read(h5_path,"var/gene_short_name")
+gene_name[str_detect(gene_name,"^[0-9]")] <- paste0("X",gene_name[str_detect(gene_name,"^[0-9]")])
+
+
+row.names(meta_df) <- paste0("C",meta_df$cell_name) %>% str_replace_all(pattern = "-", replacement = "_")
+dimnames(expr_mat) <- list(as.character(gene_name),row.names(meta_df))
+
+sel_time <- c("E11.5","E12.5","E13.5","E14.5","E15.5","E16.5")
+# Select certain timepoints
+meta_df <- subset(meta_df, timepoint %in% sel_time)
+expr_mat <- expr_mat[,colnames(expr_mat) %in% row.names(meta_df)]
+
+gc()
+
+seu_ls <- list()
+
+for(i in sel_time){
+  idx = meta_df$timepoint == i
+  seu_ls[[i]] <- CreateSeuratObject(counts = expr_mat[,idx],
+                                    meta.data = meta_df[idx,])
+}
+
+
+```
+
+
+```{r}
+
+seu_ls <- stage_1(seu_ls, cor_threshold = 0.9, nn = 10, nn_2=20, cl_resolution = 10,
+                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+                     edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 6)
+
+rtn_ls <- stage_2(seu_ls, cl_key = "merged_cluster",
+                  rtn_seurat = T, nn_2 = 20, method = "MNN",
+                  top_pcs = 30, use_glmpca = T, rare_ct = "m", resolution = 1)
+
+seu_ls <- assign_label(seu_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+
+
+
+# Try rasterization
+seu_ls <- rasterSeuratList(seu_ls,"annotation",3,T)
+
+seu_ls <- stage_1(seu_ls, cor_threshold = 0.8, nn = 8, nn_2=20, cl_resolution = 10,
+                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+                     edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 6)
+
+rtn_ls <- stage_2(seu_ls, cl_key = "merged_cluster",
+                  rtn_seurat = T, nn_2 = 20, method = "MNN",
+                  top_pcs = 30, use_glmpca = T, rare_ct = "m", resolution = 2)
+
+seu_ls <- assign_label(seu_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+
+
+
+
+
+
+plot_ls <- list()
+ref_plot_ls <- list()
+
+for(i in names(seu_ls)){
+  plot_ls[[i]] <- seu_ls[[i]]@misc[["graph_plot_cluster_sec_MNN"]] + 
+    labs(title = paste(i,"ARI",mclust::adjustedRandIndex(seu_ls[[i]]$annotation, seu_ls[[i]]$sec_cluster_MNN)))
+  ref_plot_ls[[i]] <- draw_slide_graph(seu_ls[["E12.5"]]@meta.data,col_sel = "annotation") + 
+    labs(title = i) +NoLegend()
+}
+
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol=3)
+ggarrange(plotlist = ref_plot_ls,nrow = 2,ncol=3)
+
+
+```
+
