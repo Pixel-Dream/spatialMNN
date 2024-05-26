@@ -19,3 +19,6 @@ Clustered Data
 \description{
 Louvain with Correlation Matrix
 }
+\examples{
+No Example
+}

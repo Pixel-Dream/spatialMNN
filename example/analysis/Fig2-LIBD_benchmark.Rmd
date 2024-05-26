@@ -1,0 +1,563 @@
+---
+title: "Fig2-LIBD_benchmark"
+author: "Anonymous"
+date: "2024-05-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+library(spatialLIBD)
+library(Seurat)
+library(magrittr)
+library(tidyverse)
+library(peakRAM)
+library(BASS)
+library(BayesSpace)
+library(harmony)
+options(future.globals.maxSize = 4000 * 1024^2)
+```
+
+## Load Datasets
+
+```{r cars}
+## Connect to ExperimentHub
+save_dir <- "D:/Documents/GitHub/atlasClustering/archived/benchmark_res"
+source("~/GitHub/atlasClustering/example/analysis/benchmark_helper_func.R")
+ehub <- ExperimentHub::ExperimentHub()
+## Download the small example sce data
+spe <- fetch_data(type = "spe", eh = ehub)
+
+## You may save the spe object and load from local
+# saveRDS(spe,"/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+# spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+
+seurat_ls <- spe2SeuList(spe,
+                         sample_id = "sample_id",
+                         sel_assay = "counts",
+                         sel_col = c("layer_guess_reordered_short","spatialLIBD"),
+                         col_name = c("layer","spatialLIBD"))
+
+```
+
+## Benchmark
+
+```{r }
+# Prepare
+bench_res <- data.frame(method = c("atlasClustering","PRECAST","Seurat","BayesSpace","BASS"),
+                        tic = 0,
+                        toc = 0,
+                        time = 0,
+                        mem = -1,
+                        ari = -1,
+                        ari_vec = "-",
+                        nmi = -1,
+                        nmi_vec = "-")
+fig_ls <- list()
+
+for(i in names(seurat_ls)){
+  fig_ls[[paste0("GT_",i)]] <- draw_slide_bench(seurat_ls[[i]]$coord_x,
+                                                seurat_ls[[i]]$coord_y,
+                                                seurat_ls[[i]]$layer,"Layer",i,
+                                                pal = RColorBrewer::brewer.pal(7,"Set1") %>% 
+                                                  `names<-`(c("L1","L2","L3","L4","L5","L6","WM")),
+                                                flip = T)
+}
+
+```
+
+
+
+### atlasClustering
+
+```{r }
+mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+                             top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 6)
+        
+        rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
+                          rtn_seurat = T, nn_2 = 10, method = "MNN",
+                          top_pcs = 8, use_glmpca = T, rare_ct = "m", resolution = 1)
+        
+        seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+        toc <- Sys.time()
+      }
+)
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"atlasClustering",seurat_ls,"layer","sec_cluster_MNN")
+
+for(i in names(seurat_ls)){
+  fig_ls[[paste0("AC_",i)]] <- draw_slide_bench(seurat_ls[[i]]$coord_x,
+                                                seurat_ls[[i]]$coord_y,
+                                                seurat_ls[[i]]$sec_cluster_MNN,"atlasClustering",i,flip = T)
+}
+
+```
+
+
+### PRECAST
+```{r }
+library(PRECAST)
+gc()
+mem_usage <- peakRAM(
+ {
+   tic <- Sys.time()
+   seuInt <- suppressMessages(PRECAST_test(seurat_ls,k=7,gene_num = 1000))
+   toc <- Sys.time()
+ }
+)
+
+layer_vec <- sapply(seq_along(seurat_ls),function(i){
+  tmp_df <- data.frame(barcode = row.names(seuInt@meta.data) %>% 
+                         str_sub(start = 1, end = 18) %>% .[seuInt@meta.data[["batch"]]==i])
+  tmp_df <- left_join(tmp_df,
+                      seurat_ls[[names(seurat_ls)[i]]]@meta.data[,c("barcode","layer")], 
+                      by="barcode")
+  tmp_df$layer
+  
+}) %>% unlist()
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"PRECAST",
+                     label_vec = layer_vec, result_vec = seuInt@meta.data[["cluster"]], sample_vec = seuInt@meta.data[["batch"]])
+
+for(i in names(seurat_ls)){
+  idx = seuInt@meta.data[["batch"]] == which(names(seurat_ls)==i)
+  fig_ls[[paste0("PC_",i)]] <- draw_slide_bench(seuInt@reductions[["position"]]@cell.embeddings[idx,2],
+                                                seuInt@reductions[["position"]]@cell.embeddings[idx,1],
+                                                seuInt@meta.data[["cluster"]][idx],"PRECAST",i,flip = T)
+}
+
+rm(seuInt)
+gc()
+```
+
+### Seurat
+
+```{r}
+
+mem_usage <- peakRAM(
+  {
+     tic <- Sys.time()
+     seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+       x <- NormalizeData(x)
+       x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
+       })
+     features <- SelectIntegrationFeatures(object.list = seurat_ls)
+     seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+       x <- ScaleData(x, features = features, verbose = FALSE)
+       x <- RunPCA(x, features = features, verbose = FALSE)
+       })
+     anchors <- FindIntegrationAnchors(object.list = seurat_ls, anchor.features = features, reduction = "rpca", verbose = F)
+     seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+     DefaultAssay(seu_combined) <- "integrated"
+
+         # Run the standard workflow for visualization and clustering
+     seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+     seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+     #seu_combined <- RunUMAP(seu_combined, reduction = "pca", dims = 1:10)
+     seu_combined <- FindNeighbors(seu_combined, reduction = "pca", dims = 1:10)
+     seu_combined <- FindClusters(seu_combined, resolution = 0.1)
+     toc <- Sys.time()
+  }
+)
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"Seurat",label_vec = seu_combined@meta.data[["layer"]], 
+                     result_vec = seu_combined@meta.data[["seurat_clusters"]],
+                     sample_vec = seu_combined@meta.data[["orig.ident"]])
+
+for(i in names(seurat_ls)){
+  idx = seu_combined@meta.data[["orig.ident"]] == paste0("spe_",i)
+  fig_ls[[paste0("SR_",i)]] <- draw_slide_bench(seu_combined@meta.data[["coord_x"]][idx],
+                                                seu_combined@meta.data[["coord_y"]][idx],
+                                                seu_combined@meta.data[["seurat_clusters"]][idx],"Seurat",i,flip = T)
+}
+
+
+
+```
+### BayesSpace
+
+```{r}
+#BayesSpace
+
+sce <- SingleCellExperiment(assays=list(counts=spe@assays@data@listData[["logcounts"]]),
+                            rowData=NULL,
+                            colData=spe@colData)
+
+sample_names <- levels(as.factor(sce$sample_id))
+
+sce$row <- sce$array_row
+sce$col <- sce$array_col
+
+
+for(j in seq_along(sample_names)){
+  sce$row[sce$sample_id == sample_names[j]] <- sce$row[sce$sample_id == sample_names[j]] + 100*((j-1)%%3)
+  sce$col[sce$sample_id == sample_names[j]] <- sce$col[sce$sample_id == sample_names[j]] + 150*floor((j-1)/3)
+}
+
+mem_usage <- peakRAM(
+  {
+    tic <- Sys.time()
+    sce <- spatialPreprocess(sce, platform="Visium", n.PCs = 50)
+    sce = RunHarmony(sce, "sample_id", verbose = F)
+    #sce <- qTune(sce, qs=seq(2, 10), platform="ST", d=7)
+    #qPlot(sce)
+    
+    sce <- spatialCluster(sce, use.dimred = "HARMONY", q = 7, nrep = 10000)
+    toc <- Sys.time()
+  }
+)
+
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"BayesSpace",
+                     label_vec  = sce@colData@listData[["spatialLIBD"]], 
+                     result_vec = sce@colData@listData[["spatial.cluster"]],
+                     sample_vec = sce@colData@listData[["sample_id"]])
+
+for(i in names(seurat_ls)){
+  idx = sce@colData@listData[["sample_id"]] == i
+  fig_ls[[paste0("BS_",i)]] <- draw_slide_bench(sce@colData@listData[["row"]][idx],
+                                                sce@colData@listData[["col"]][idx],
+                                                sce@colData@listData[["spatial.cluster"]][idx],"BayesSpace",i,flip = F)
+}
+
+
+
+
+
+```
+
+
+### BASS
+
+```{r}
+mem_usage <- peakRAM(
+  {
+    tic <- Sys.time()
+    set.seed(0)
+    # Set up BASS object
+    BASS <- createBASSObject(lapply(seurat_ls, 
+                                    function(seu_obj){
+                                      seu_obj@assays[["RNA"]]@layers[["counts"]] %>% 
+                                        `colnames<-`(colnames(seu_obj)) %>% `row.names<-`(row.names(seu_obj))
+                                      }), 
+                             lapply(seurat_ls, 
+                                    function(seu_obj){
+                                      data.frame(x=seu_obj$coord_x,
+                                                 y=seu_obj$coord_y,
+                                                 row.names=colnames(seu_obj))
+                                      }), 
+                             C = 20, R = 7,
+      beta_method = "SW", init_method = "mclust", 
+      nsample = 10000)
+    
+    BASS <- BASS.preprocess(BASS, doLogNormalize = TRUE,
+      geneSelect = "sparkx", nSE = 3000, doPCA = TRUE, 
+      scaleFeature = FALSE, nPC = 20)
+    
+    # Run BASS algorithm
+    BASS <- BASS.run(BASS)
+    BASS <- BASS.postprocess(BASS)
+    toc <- Sys.time()
+  }
+)
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"BASS",
+                     label_vec  = sce@colData@listData[["spatialLIBD"]], 
+                     result_vec = unlist(BASS@results$z),
+                     sample_vec = sce@colData@listData[["sample_id"]])
+
+for(i in names(seurat_ls)){
+  idx = sce@colData@listData[["sample_id"]] == i
+  fig_ls[[paste0("BA_",i)]] <- draw_slide_bench(sce@colData@listData[["row"]][idx],
+                                                sce@colData@listData[["col"]][idx],
+                                                unlist(BASS@results$z)[idx],"BASS",i,flip = F)
+}
+
+```
+
+
+## Generate Figures
+```{r}
+# ARI/NMI boxplot
+fig_ls[["ARI_stat"]] <- ggplot(data.frame(method = rep(bench_res$method, each=length(seurat_ls)),
+                                          ARI = sapply(bench_res$ari_vec,function(s)str_split(s,pattern = ",")) %>% 
+                                            unlist %>% as.numeric()),
+                               aes(x = method, y = ARI, fill = method)) + 
+  geom_boxplot() + 
+  theme_classic()
+
+fig_ls[["NMI_stat"]] <- ggplot(data.frame(method = rep(bench_res$method, each=length(seurat_ls)),
+                  NMI = sapply(bench_res$nmi_vec,function(s)str_split(s,pattern = ",")) %>% unlist %>% as.numeric()),
+       aes(x = method, y = NMI, fill = method)) + 
+  geom_boxplot() + 
+  theme_classic()
+
+# Time/Mem 
+fig_ls[["Mem_stat"]] <- ggplot(data.frame(method = bench_res$method,
+                  Mem = bench_res$mem),
+       aes(x = method, y = Mem, fill = method)) + 
+  geom_bar(stat = "identity",width = 0.5) + 
+  theme_classic()
+
+fig_ls[["Time_stat"]] <- ggplot(data.frame(method = bench_res$method,
+                  Time_min = (bench_res$toc-bench_res$tic)/60),
+       aes(x = method, y = Time_min, fill = method)) + 
+  geom_bar(stat = "identity",width = 0.5) + 
+  theme_classic()
+
+# Sample Plot
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_results2.pdf")),width = 4*9,height = 4)
+sample_id = names(seurat_ls)[1]
+
+ggpubr::ggarrange(plotlist = list(fig_ls[[paste0("GT_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("AC_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("PC_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("BS_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("BA_",sample_id)]] + NoLegend(),
+                                  fig_ls[["ARI_stat"]],fig_ls[["NMI_stat"]],fig_ls[["Time_stat"]],fig_ls[["Mem_stat"]]),
+                  nrow = 1,ncol = 9)
+dev.off()
+
+write_tsv(bench_res,file.path(save_dir, paste0(Sys.Date(),"_DLPFC_bench_res.tsv")))
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_ground_truth.pdf")),width = 6,height = 6)
+
+ggpubr::ggarrange(plotlist = lapply(names(seurat_ls),function(x){fig_ls[[paste0("GT_",x)]]}),
+                  nrow = 1,ncol = 1)
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_ARI_stat.pdf")),width = 6,height = 4)
+fig_ls[["ARI_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_NMI_stat.pdf")),width = 6,height = 4)
+fig_ls[["NMI_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_Time_stat.pdf")),width = 6,height = 4)
+fig_ls[["Time_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_Mem_stat.pdf")),width = 6,height = 4)
+fig_ls[["Mem_stat"]] %>% print()
+dev.off()
+
+# Export individual figure
+for(i in 1:nrow(bench_res)){
+  j = switch(bench_res$method[i],
+             atlasClustering = "AC",
+             PRECAST = "PC",
+             Seurat = "SR",
+             BayesSpace = "BS",
+             BASS = "BA")
+  # Running results
+  pdf(file.path(save_dir, paste0(Sys.Date(),"_DLPFC_Benchmark_",bench_res$method[i],"_res.pdf")),width = 6,height = 6)
+  
+  ggpubr::ggarrange(plotlist = lapply(names(seurat_ls),function(x){fig_ls[[paste0(j,"_",x)]] + NoLegend()}),
+                    nrow = 1,ncol = 1) %>% print()
+  dev.off()
+}
+
+
+
+saveRDS(fig_ls, file.path(save_dir, paste0(Sys.Date(),"_DLPFC_bench_fig.RDS")))
+```
+
+
+
+## Export to h5ad
+For running benchmark on python packages 
+
+```{r}
+```
+
+
+
+
+
+## Combined Anlysis
+
+```{r }
+seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+          x <- NormalizeData(x)
+          x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
+})
+features <- SelectIntegrationFeatures(object.list = seurat_ls)
+seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+  x <- ScaleData(x, features = features, verbose = FALSE)
+  x <- RunPCA(x, features = features, verbose = FALSE)
+  })
+anchors <- FindIntegrationAnchors(object.list = seurat_ls, anchor.features = features, reduction = "rpca", verbose = F)
+seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+DefaultAssay(seu_combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+# Save combined obj
+saveRDS(seu_combined,file = "DLPFC_cl_combined.RDS")
+
+```
+
+### corrleation
+```{r}
+set.seed(2024)
+sample_index <- sample(1:ncol(seu_combined),2500)
+sample_expr_mat <- as.matrix(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),sample_index])
+
+cor_mat <- cor(sample_expr_mat)
+sample_cl <- seu_combined$sec_cluster_MNN[sample_index]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+
+
+expr_mat <- as.matrix(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == "spe_151675"])
+
+cor_mat <- cor(expr_mat)
+sample_cl <- seu_combined$sec_cluster_MNN[seu_combined$orig.ident == "spe_151675"]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+sample_cl <- seu_combined$layer[seu_combined$orig.ident == "spe_151675"]
+Heatmap(cor_mat, column_split = sample_cl, row_split = sample_cl, show_column_names = F, show_row_names = F)
+# Sample/Cluster Averaged Heatmap
+cor_mat <- (length(levels(as.factor(seu_combined$orig.ident)))*length(levels(as.factor(seu_combined$sec_cluster_MNN)))) %>% 
+  matrix(0, ncol = ., nrow = .)
+sample_vec <- levels(as.factor(seu_combined$orig.ident))
+cl_vec <- levels(as.factor(seu_combined$sec_cluster_MNN))
+for(li in seq_along(sample_vec)){
+  for(lj in seq_along(cl_vec)){
+    message(paste("sample:",sample_vec[li],", Cluster:",cl_vec[lj]))
+    for(ui in seq_along(sample_vec)){
+      for(uj in seq_along(cl_vec)){
+        if(uj+(ui-1)*length(cl_vec) > lj+(li-1)*length(cl_vec)){
+          
+          cor_mat[lj+(li-1)*length(cl_vec),uj+(ui-1)*length(cl_vec)] <- 
+            cor(seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == sample_vec[li] & seu_combined$sec_cluster_MNN == cl_vec[lj]] %>% rowMeans(),
+                seu_combined@assays$integrated@scale.data[VariableFeatures(seu_combined),seu_combined$orig.ident == sample_vec[ui] & seu_combined$sec_cluster_MNN == cl_vec[uj]] %>% rowMeans())
+        }else{
+          cor_mat[lj+(li-1)*length(cl_vec),uj+(ui-1)*length(cl_vec)] <- cor_mat[uj+(ui-1)*length(cl_vec),lj+(li-1)*length(cl_vec)]
+        }
+      }
+    }
+  }
+}
+for(li in 1:nrow(cor_mat)) cor_mat[li,li] <- 1
+
+Heatmap(cor_mat,
+        top_annotation = 
+          HeatmapAnnotation(sample = rep(sample_vec,each = length(cl_vec)),
+                            cluster = rep(cl_vec, length(sample_vec)),
+                            col = list(sample = RColorBrewer::brewer.pal(length(sample_vec),"Paired") %>% `names<-`(sample_vec),
+                                       cluster = RColorBrewer::brewer.pal(length(cl_vec),"Set1") %>% `names<-`(cl_vec) )),
+        show_column_names = F, show_row_names = F)
+```
+
+### Findmarkers
+
+```{r}
+Idents(seu_combined) <- seu_combined@meta.data[["sec_cluster_MNN"]]
+marker_ls <- FindAllMarkers(seu_combined)
+
+go_ls <- list()
+
+
+library(gprofiler2)
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  message(i)
+  go_ls[[paste0("cl_",i)]] <- gost(query = marker_ls$gene[marker_ls$cluster == i & marker_ls$avg_log2FC > 0], organism = "hsapiens")
+}
+
+plot_ls <- list()
+
+
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(go_ls[[paste0("cl_",i)]][["result"]] %>% subset(source == "GO:BP") %>% 
+                                         arrange(desc(p_value)) %>% 
+                                         mutate(term_name = factor(.$term_name, levels = .$term_name)),
+       aes(x = term_name, y = -log10(p_value))) +
+    geom_bar(stat = "identity") + coord_flip() + 
+    labs(title = paste("Cluster",i)) +
+    theme_classic()
+}
+
+
+all_markers <- FindAllMarkers(seu_combined,logfc.threshold = 0)
+for(i in levels(as.factor(seu_combined$sec_cluster_MNN))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(all_markers %>% subset(cluster == i & pct.1 > 0.1 & pct.2 > 0.1) %>% 
+                                         mutate(de = ifelse(p_val_adj < 0.01 & abs(avg_log2FC) > 0.1,ifelse(avg_log2FC > 0,"UP","DOWN"),"NO")),
+       aes(x = avg_log2FC, y = -log10(p_val_adj), color = de)) +
+    geom_point() +
+    labs(title = paste("Cluster",i)) +
+    scale_color_manual(values = c("UP" = "green", "DOWN" = "red","NO" = "grey")) +
+    theme_classic()
+}
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 4)
+```
+## Pseudobulk
+
+```{r }
+avg_expr_mat <- matrix(0,nrow=nrow(seu_combined@assays[["RNA"]]@data), ncol = length(cl_vec)*length(sample_vec)) %>%
+  `row.names<-`(row.names(seu_combined@assays[["RNA"]]@data)) %>% 
+  `colnames<-`(paste(rep(sample_vec,each=length(cl_vec)),rep(cl_vec,length(sample_vec)),sep = "_"))
+  
+for(i in sample_vec){
+  for(j in cl_vec){
+    avg_expr_mat[,paste0(i,"_",j)] <- rowMeans(seu_combined@assays[["RNA"]]@counts[,seu_combined$sec_cluster_MNN == j & seu_combined$orig.ident == i])
+  }
+}
+library(DESeq2)
+
+
+avg_expr_mat <- round(avg_expr_mat*1000)
+avg_expr_mat_filter <- avg_expr_mat[rowSums(avg_expr_mat) >= 10,]
+de_res <- list()
+
+for(i in levels(as.factor(cl_vec))){
+  message(paste("cluster",i))
+  col_data <- data.frame(sample = rep(sample_vec,each=length(cl_vec)),
+                       cluster = rep(cl_vec,length(sample_vec))==i  )
+  dds <- DESeqDataSetFromMatrix(countData = avg_expr_mat_filter,
+                              colData = col_data,
+                              design = ~ cluster)
+
+  #Filter
+  dds <- dds[rowSums(counts(dds)) >= 10,]
+
+  #DE
+  dds <- DESeq(dds)
+  de_res[[paste0("cl_",i)]] <- results(dds)
+}
+
+# Volcano Plot
+for(i in levels(as.factor(cl_vec))){
+  plot_ls[[paste0("cl_",i)]] <- ggplot(as.data.frame(de_res[[paste0("cl_",i)]]) %>% 
+                                         mutate(de = ifelse(padj < 0.01 & abs(log2FoldChange) > 0.5,ifelse(log2FoldChange > 0,"UP","DOWN"),"NO")),
+       aes(x = log2FoldChange, y = -log10(padj), color = de)) +
+    geom_point() +
+    labs(title = paste("Cluster",i)) +
+    scale_color_manual(values = c("UP" = "green", "DOWN" = "red","NO" = "grey")) +
+    theme_classic()
+}
+
+ggarrange(plotlist = plot_ls,nrow = 2,ncol = 4)
+
+
+```
+
+## Save results
+
+```{r}
+saveRDS(seu_combined,file = "DLPFC_combined_seu_obj.RDS")
+saveRDS(all_markers,file = "DLPFC_combined_de_res.RDS")
+
+```
+
+
+
+
+
+

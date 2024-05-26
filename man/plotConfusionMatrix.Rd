@@ -21,4 +21,5 @@ Draw Confusion Matrix using ComplexHeatmap
 x_ <- sample(1:4,100,replace = T)
 y_ <- sample(1:5,100,replace = T)
 plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
+
 }

@@ -50,7 +50,7 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
 #' @param flip Whether swap x-y coordinates
 #'
 #' @return A Heatmap-class object.
-#'
+#' @import ggplot2
 #' @export
 #'
 #' @examples

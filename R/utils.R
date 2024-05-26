@@ -102,8 +102,8 @@ spe2SeuList <- function(spe,
 #' @import igraph
 #'
 #'
-#' #' @examples
-#' # No Example
+#' @examples
+#' No Example
 louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
   for(j in seq_len(nrow(cor_mat_))){
     not_nn_vec <- sort(cor_mat_[,j],decreasing = T)[(nn_+2):ncol(cor_mat_)] %>% names()
