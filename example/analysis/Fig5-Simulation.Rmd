@@ -26,7 +26,7 @@ options(future.globals.maxSize = 4000 * 1024^2)
 
 ```{r}
 sample_num_seq <- c(2^c(1:6))
-bench_tml <- data.frame(method = c("spatialMNN","PRECAST","Seurat","BASS","BayesSpace"),
+bench_tml <- data.frame(method = c("spatialMNN","PRECAST","Seurat","BASS","BayesSpace","spatialMNN_par"),
                         tic = 0,
                         toc = 0,
                         time = 0,
@@ -93,16 +93,17 @@ for Memory&Time Comparison
 ```{r} 
 ## SET BENCHMARK FLAG
 run_spatialMNN = T
+run_spatialMNN_par = T
 run_Seurat = F
-run_BayesSpace = F
-run_BASS = F
-run_PRECAST = F
+run_BayesSpace = T
+run_BASS = T
+run_PRECAST = T
 
 
 
 for(it in 1:5){
   message(paste("Iter:",it))
-  for(i in c(1:3)){
+  for(i in c(5)){
     bench_res <- bench_res_ls[[paste0("it_",it,"_n_",sample_num_seq[i])]]
     message(paste("Sample Num:",sample_num_seq[i]))
     # Generate Datasets
@@ -146,6 +147,25 @@ for(it in 1:5){
       bench_res <- rkd_res(bench_res, tic, toc, mem_usage, "spatialMNN", seu_ls, "layer","sec_cluster_MNN")
       rm(rtn_ls)
     }
+    if(run_spatialMNN_par){
+      mem_usage <- peakRAM(
+        {
+          tic <- Sys.time()
+          seu_ls  <- stage_1(seu_ls ,find_HVG = F, top_pcs = 4, 
+                             cor_threshold = 0.6, edge_smoothing = T, nn = 6, 
+                             use_glmpca = T, verbose = T, num_core = 8)
+          
+          rtn_ls <- stage_2(seu_ls , cl_key = "merged_cluster",rtn_seurat = T,
+                            nn_2 = 2,method = "MNN",top_pcs = 4, use_glmpca = T, 
+                            rare_ct = "m", resolution = 1)
+          seu_ls  <- assign_label(seu_ls , rtn_ls$cl_df, "MNN", 
+                                  cl_key = "merged_cluster",cor_threshold = 0.6)
+          toc <- Sys.time()
+        }
+      )
+      bench_res <- rkd_res(bench_res, tic, toc, mem_usage, "spatialMNN_par", seu_ls, "layer","sec_cluster_MNN")
+      rm(rtn_ls)
+    }
     # Seurat
     if(run_Seurat){
       mem_usage <- peakRAM(
@@ -169,12 +189,13 @@ for(it in 1:5){
           seu_combined <- FindClusters(seu_combined, resolution = 0.1, cluster.name = "cca_cl")
         
           toc <- Sys.time()
-          bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"Seurat",label_vec = seu_combined@meta.data[["layer"]], 
-                           result_vec = seu_combined@meta.data[["cca_cl"]],
-                           sample_vec = seu_combined@meta.data[["batch"]])
+          
         }
       )
-      
+      bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"Seurat",label_vec = seu_combined@meta.data[["layer"]], 
+                           result_vec = seu_combined@meta.data[["cca_cl"]],
+                           sample_vec = seu_combined@meta.data[["batch"]])
+      rm(seu_combined)
     }
     #BayesSpace
     if(run_BayesSpace){
@@ -182,9 +203,9 @@ for(it in 1:5){
                                                             FUN = function(x)seu_ls[[x]]@assays[["RNA"]]@layers[["counts"]]) %>%
                                               do.call(cbind,.) %>% `row.names<-`(row.names(seu_ls[[1]]))),
                                 rowData=NULL,
-                                colData=seu_combined@meta.data)
+                                colData=lapply(names(seu_ls), FUN = function(x)seu_ls[[x]]@meta.data) %>%do.call(rbind,.) )
       sce@assays@data@listData[["logcounts"]] <- sce@assays@data@listData[["counts"]]
-      rm(seu_combined)
+      
       gc()
       
       sample_names <- levels(as.factor(sce@colData@listData[["batch"]]))
@@ -310,22 +331,8 @@ bench_res_df <- bench_res_df %>%
   mutate(Memory = mem/1024,
          TimeElapsed =  (toc-tic)/60)
   
-# from running results
-bench_res_df <- lapply(bench_res_ls,function(x)do.call(rbind.data.frame,x)) %>%  
-  do.call(rbind.data.frame,.) %>%
-  mutate(Method = rep(c("TSC","PRECAST","Seurat","BayesSpace","mbkmeans"),each = 4,times=length(bench_res_ls)),
-         Memory = mem/1024,
-         TimeElapsed =  (toc-tic)/60)
 
-bench_res_summ <- bench_res_df %>% group_by(sample_num,Method) %>% 
-  summarise(mean_ARI = mean(ari),
-            mean_Time = mean(TimeElapsed),
-            mean_Mem = mean(Memory),
-            sd_ARI = sd(ari),
-            sd_Time = sd(TimeElapsed),
-            sd_Mem = sd(Memory))
-#bench_res_df <- bench_res_df[1:11,]
-library(ggforce)
+
 plot_ls[["ARI"]] <- ggplot(bench_res_df,aes(x = as.factor(n), y = ari, fill=method)) + 
     geom_boxplot() + 
     xlab("Sample Num") +  ylab("ARI") + 
@@ -340,7 +347,7 @@ plot_ls[["Time"]] <- ggplot(bench_res_df%>% group_by(method,n) %>% summarise(mea
        aes(x = as.factor(n), y = mean_time, color=method, group=method)) + 
   geom_line() +
   geom_point()+
-  xlab("Sample Num") +  ylab("Mean Time") + 
+  xlab("Sample Num") +  ylab("Mean Time (min)") + 
   geom_errorbar(aes(ymin=mean_time-sd, ymax=mean_time+sd), width=.2,
                  position=position_dodge(0.05)) +
   theme_classic()
@@ -349,13 +356,13 @@ plot_ls[["Mem"]] <- ggplot(bench_res_df%>% group_by(method,n) %>% summarise(mean
        aes(x = as.factor(n), y = mean_mem, color=method, group=method)) + 
   geom_line() +
   geom_point()+
-  xlab("Sample Num") +  ylab("Mean Memory") + 
+  xlab("Sample Num") +  ylab("Mean Memory (GB)") + 
   geom_errorbar(aes(ymin=mean_mem-sd, ymax=mean_mem+sd), width=.2,
                  position=position_dodge(0.05)) +
   theme_classic()
 
 
-
+library(ggpubr)
 ggarrange(plotlist = plot_ls,nrow = 1,ncol = 4)
 
 
