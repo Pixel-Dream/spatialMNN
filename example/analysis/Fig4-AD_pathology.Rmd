@@ -1,0 +1,139 @@
+---
+title: "Fig4-AD_pathology"
+author: "Anonymous"
+date: "2024-06-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(atlasClustering)
+library(Seurat)
+```
+
+## Load Datasets
+
+```{r}
+expr_mat <- read_csv("G://projects_bk/starmap/visual_1020/expression_matrix_raw.csv")
+gene_vec <- unlist(expr_mat[,1])
+expr_mat <- expr_mat[,-1] %>% as.matrix()
+meta_df <- read_csv("G:/projects_bk/starmap/visual_1020/metadata.csv", skip = 1) %>% 
+  `colnames<-`(read.csv(file = "G:/projects_bk/starmap/visual_1020/metadata.csv", nrows = 1,header = F))
+meta_ls <- lapply(paste0("G:/projects_bk/starmap/visual_1020/spatial_",rep(c(8,13),each=4),
+                        "months-",rep(c("control","disease"),times=2,each=2),"-replicate_",
+                        rep(1:2,4),".csv"),
+                  FUN = function(x){
+                    read.csv(file = x, skip = 2) %>% `colnames<-`(read.csv(file = x, nrows = 1,header = F))
+                  })
+
+tmp_df <- do.call(rbind.data.frame, meta_ls)
+
+
+meta_df <- left_join(meta_df,tmp_df[,-6],by = "NAME")
+```
+
+## Remove cells w/o coords
+
+```{r}
+expr_mat <- expr_mat[,!is.na(meta_df$X)]
+meta_df <- meta_df[!is.na(meta_df$X),] %>% as.data.frame()
+
+sample_vec <- levels(as.factor(meta_df$biosample_id))
+
+colnames(expr_mat) <- paste0(meta_df$biosample_id,"_",meta_df$NAME)
+row.names(expr_mat) <- gene_vec
+row.names(meta_df)<- paste0(meta_df$biosample_id,"_",meta_df$NAME)
+
+colnames(meta_df)[23:24] <- c("coord_x","coord_y")
+
+seu_ls <- lapply(sample_vec,
+                 FUN = function(x){
+                   suppressWarnings(CreateSeuratObject(counts = expr_mat[,meta_df$biosample_id == x],
+                                      meta.data = meta_df[meta_df$biosample_id == x,]))
+                 })
+
+names(seu_ls) <- sample_vec
+```
+
+## Run Pipeline
+
+```{r}
+# Only on AD sample
+sel_sample <- c("ADmouse_9723_2_brain","ADmouse_9723_brain","ADmouse_11346_brain","ADmouse_9494_brain")
+
+
+seu_ls <- stage_1(seu_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+                     top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+                     edge_smoothing = T, use_glmpca = T, verbose = T)
+# perform state 2 of atlasclustering
+rtn_ls <- stage_2(seu_ls, cl_key = "merged_cluster",
+                  rtn_seurat = T, nn_2 = 10, method = "MNN",
+                  top_pcs = 10, use_glmpca = T, rare_ct = "m", resolution = 1)
+
+# assign labels from the two stages of atlasclustering
+seu_ls <- assign_label(seu_ls[sel_sample], rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+
+# Save results
+#saveRDS(seu_ls,"STARmap_cl.RDS")
+#saveRDS(rtn_ls,"STARmap_stage2_res.RDS")
+
+
+```
+
+## Visualization
+
+```{r}
+
+
+ggplot(rtn_ls$cl_df,aes(x=umap_1, y=umap_2,color=sample)) + 
+  geom_point()+
+  theme_classic()
+
+ggplot(rtn_ls$cl_df,aes(x=umap_1, y=umap_2,color=louvain)) + 
+    geom_point()+
+    scale_color_manual(values = cl_pal)+
+    theme_classic()
+
+cl_pal <- c(RColorBrewer::brewer.pal(12,"Paired"),"cyan") %>% `names<-`(levels(as.factor(rtn_ls$cl_df$louvain)))
+
+ggarrange(plotlist = lapply(names(seu_ls)[sel_sample],
+                            FUN = function(x)seu_ls[[x]]@misc[["graph_plot_cluster_sec_MNN"]]+
+                              scale_color_manual(values = cl_pal)),
+          ncol = 2,nrow = 2)
+
+ct_pal <- c(RColorBrewer::brewer.pal(12,"Paired"),"cyan") %>% 
+  `names<-`(levels(as.factor(meta_df$top_level_cell_type.x)))
+
+ggarrange(plotlist = lapply(names(seu_ls),
+                            FUN = function(x){
+                              ggplot(seu_ls[[x]]@meta.data,aes(x = coord_y,y=coord_x,color=top_level_cell_type.x))+
+                                geom_point()+
+                                theme_classic()+
+                                labs(title = x)+
+                                scale_color_manual(values = ct_pal)
+                            }),
+          ncol = 2,nrow = 2)
+
+```
+
+## Calculate ARI
+
+```{r }
+
+ari_vec <- sapply(names(seu_ls),
+                  FUN = function(x){
+                    mclust::adjustedRandIndex(seu_ls[[x]]@meta.data[["top_level_cell_type.x"]],
+                                     seu_ls[[x]]@meta.data[["sec_cluster_MNN"]])
+                  })
+
+ari_vec <- sapply(names(seu_ls),
+                  FUN = function(x){
+                    mclust::adjustedRandIndex(seu_ls[[x]]@meta.data[["region"]],
+                                     seu_ls[[x]]@meta.data[["sec_cluster_MNN"]])
+                  })
+
+
+
+```
+

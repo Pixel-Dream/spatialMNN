@@ -314,10 +314,36 @@ for(it in 1:5){
 
 
 plot_ls <-list()
-# Optional load .csv results
 
-for(it in 1:4){
-  for(i in c(1:4)){
+# Optional load .csv results
+for(it in 1:5){
+  for(i in c(1:5)){
+    if(it == 1 & i == 1){
+      bench_res_df <- rbind(read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-31_",it,"_2_bench_res.csv")))[-3,],
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-06-06_",it,"_2_bench_res.csv")))[3,]) %>% 
+        add_column(it = it, sample_num = sample_num_seq[i])
+    }else if(i %in% c(1:4)){
+      bench_res_df <- rbind(read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-31_",it,"_",sample_num_seq[i],"_bench_res.csv")))[-3,],
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-06-06_",it,"_",sample_num_seq[i],"_bench_res.csv")))[3,]) %>% 
+        add_column(it = it, sample_num = sample_num_seq[i]) %>% rbind(bench_res_df,.)
+    }else if(i == 5){
+      bench_res_df <- rbind(bench_res_df,
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-30_",it,"_32_bench_res.csv")))[-3,] %>% 
+                              add_column(it = it, sample_num = sample_num_seq[i]))
+    }
+    
+  }
+}
+
+
+# From notebook
+for(it in 1:5){
+  for(i in c(1:5)){
     if(it == 1 & i == 1){
       bench_res_df <- data.frame(it=1,n=2^i,bench_res_ls[[paste0("it_",it,"_n_",2^i)]])
     }else{
@@ -327,39 +353,56 @@ for(it in 1:4){
   }
 }
 
+
+#filter
+bench_res_df <- bench_res_df[bench_res_df$ari!=-1,]
+
 bench_res_df <- bench_res_df %>%
-  mutate(Memory = mem/1024,
-         TimeElapsed =  (toc-tic)/60)
+  mutate(Memory = as.numeric(mem)/1024,
+         TimeElapsed =  (as.numeric(toc)-as.numeric(tic))/60)
   
 
+method_pal <- RColorBrewer::brewer.pal(8,"Set1")[-c(6:7)] %>% `names<-`(c("spatialMNN","PRECAST","Seurat","BASS","BayesSpace","spatialMNN_par"))
 
-plot_ls[["ARI"]] <- ggplot(bench_res_df,aes(x = as.factor(n), y = ari, fill=method)) + 
-    geom_boxplot() + 
-    xlab("Sample Num") +  ylab("ARI") + 
-    theme_classic()
-
-plot_ls[["NMI"]] <- ggplot(bench_res_df,aes(x = as.factor(n), y = nmi, fill=method)) + 
-    geom_boxplot() + 
-    xlab("Sample Num") +  ylab("NMI") + 
-    theme_classic()
-
-plot_ls[["Time"]] <- ggplot(bench_res_df%>% group_by(method,n) %>% summarise(mean_time = mean(TimeElapsed), sd = sd(TimeElapsed)), 
-       aes(x = as.factor(n), y = mean_time, color=method, group=method)) + 
+lineplot_bench_res <- function(sample_num_vec, 
+                               metrics_vec, 
+                               method_vec, 
+                               pal_=NULL, x_title="Sample Num", y_title = ""){
+  
+  g <- ggplot(data.frame(x = sample_num_vec, y = metrics_vec, method = method_vec) %>% 
+                group_by(method,x) %>% summarise(mean_met = mean(y), sd = sd(y)), 
+       aes(x = as.factor(x), y = mean_met, color = method, group = method)) + 
   geom_line() +
   geom_point()+
-  xlab("Sample Num") +  ylab("Mean Time (min)") + 
-  geom_errorbar(aes(ymin=mean_time-sd, ymax=mean_time+sd), width=.2,
-                 position=position_dodge(0.05)) +
+  xlab(x_title) +  ylab(y_title) + 
+  geom_errorbar(aes(ymin=mean_met-sd, ymax=mean_met+sd), 
+                width=.5,position=position_dodge(0.05)) +
   theme_classic()
+  
+  if(!is.null(pal_)) g <- g + scale_color_manual(values = pal_)
+  
+  g
+  
+}
 
-plot_ls[["Mem"]] <- ggplot(bench_res_df%>% group_by(method,n) %>% summarise(mean_mem = mean(Memory), sd = sd(Memory)), 
-       aes(x = as.factor(n), y = mean_mem, color=method, group=method)) + 
-  geom_line() +
-  geom_point()+
-  xlab("Sample Num") +  ylab("Mean Memory (GB)") + 
-  geom_errorbar(aes(ymin=mean_mem-sd, ymax=mean_mem+sd), width=.2,
-                 position=position_dodge(0.05)) +
-  theme_classic()
+
+plot_ls[["ARI"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$ari, 
+                                       bench_res_df$method,method_pal,y_title = "ARI")
+
+plot_ls[["NMI"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$nmi, 
+                                       bench_res_df$method,method_pal,y_title = "NMI")
+
+plot_ls[["Time"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$TimeElapsed, 
+                                       bench_res_df$method,method_pal,y_title = "Mean Time (min)")
+
+
+plot_ls[["Mem"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$Memory, 
+                                       bench_res_df$method,method_pal,y_title = "Mean Memory (GB)")
+
 
 
 library(ggpubr)

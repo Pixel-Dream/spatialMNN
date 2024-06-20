@@ -369,17 +369,6 @@ saveRDS(fig_ls, file.path(save_dir, paste0(Sys.Date(),"_DLPFC_bench_fig.RDS")))
 ```
 
 
-
-## Export to h5ad
-For running benchmark on python packages 
-
-```{r}
-```
-
-
-
-
-
 ## Combined Anlysis
 
 ```{r }

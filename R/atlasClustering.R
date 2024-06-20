@@ -23,6 +23,8 @@
 #' @import parallel
 #' @import ggnewscale
 #' @import igraph
+#' @import DescTools
+#' @import HiClimR
 #' @importFrom dbscan kNN
 #'
 #'
@@ -34,6 +36,7 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
                        edge_smoothing = T, use_glmpca = T, verbose = F){
   obj_name <- seu_obj@meta.data[["orig.ident"]][1]
   if(find_HVG){
+    seu_obj <- NormalizeData(seu_obj)
     stopifnot("HVG# Exceeded" = hvg <= nrow(seu_obj))
     seu_obj <- FindVariableFeatures(seu_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
   }else{
