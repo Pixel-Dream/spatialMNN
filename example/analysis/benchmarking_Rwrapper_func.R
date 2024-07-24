@@ -8,22 +8,39 @@ require(scater)
 require(harmony)
 require(tidyr)
 require(dplyr)
+require(Seurat)
+require(Banksy)
+require(data.table)
 
 
 # Function for creating anndata objects for
 # each sample in spe object and saving as h5ad files.
-create_annFiles <- function(spe, annots, filepath) {
+create_annFiles <- function(spe, annots_label, sample_label,
+                            fileSavepath, genePanel = TRUE) {
 
   # ####  Options explanation
   # spe = spe object containing gene expressions of
   # cells from all samples
-  # annots = name of colData column with domain annotations
-  # filepath = path where anndata files should be saved to
+  # annots_label = name of colData(spe) column with domain annotations
+  # sample_label = name of colData(spe) column with sample names
+  # fileSavepath = path where anndata files should be saved
+  # genePanel = TRUE when data is from a gene panel, and not
+  #   whole transcriptome (genePanel = FALSE)
 
   spe = logNormCounts(spe)
-  spe = runPCA(spe)
-  reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
-                                                        colData(spe), 'sample')
+  if (genePanel == TRUE) {
+    spe = runPCA(spe)
+    reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
+                                                          colData(spe), 'sample')
+  } else { # for data from whole transcriptome identify top 2000 HVGs
+    seu = as.Seurat(spe)
+    seu = FindVariableFeatures(seu, nfeatures = 2000)
+    spe = spe[VariableFeatures(seu), ]
+    spe = runPCA(spe)
+    reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
+                                                          colData(spe), 'sample')
+  }
+
   # generating h5ad file for each sample
   samplePaths_vec = c()
   sampleNames_vec = c()
@@ -54,8 +71,8 @@ create_annFiles <- function(spe, annots, filepath) {
       ),
       layers = list(
         logcounts = t(logcounts(speX))))
-    write_h5ad(ad, paste0(filepath, sample, ".h5ad"))
-    samplePaths_vec = append(samplePaths_vec, paste0(filepath, sample, ".h5ad"))
+    write_h5ad(ad, paste0(fileSavepath, sample, ".h5ad"))
+    samplePaths_vec = append(samplePaths_vec, paste0(fileSavepath, sample, ".h5ad"))
     sampleNames_vec = append(sampleNames_vec, sample)
   }
   # return a list of vectors containing
@@ -242,4 +259,156 @@ runMENDER <- function(python_path, pyscript_path,
   return(list("clusters" = clusters_df,
               "metrics" = metrics_df,
               "mender_output" = mender_out))
+}
+
+# Function for running BANKSY
+runBANKSY <- function(spe, batch = TRUE, sample_info, annots_label = NULL,
+                      sample_label, k_geom, lambda, res, npcs = 20,
+                      SEED = 1000, use_agf = TRUE, compute_agf = TRUE){
+  #### Banksy parameters
+  # compute_agf = TRUE computes both weighted neighborhood mean (H_0) and
+  #   the azimuthal Gabor filter (H_1).
+  # lambda is mixing parameter, ranges from 0-1.
+  #   Smaller lambda for cell-typing mode (recommended value is 0.2),
+  #   Higher lambda for domain-finding mode (recommended value is 0.8).
+  #   Recommended lambda = 0.2 for visium data.
+  # k_geom is neighbourhood size.
+  #   k_geom = 6 corresponds to first-order neighbors in visium data,
+  #   whereas k_geom = 18 corresponds to first and second-order neighbors.
+  #   Recommended k_geom = 18 for Visium spots, and
+  #   and k_geom = c(15, 30) for other data.
+  # res is Leiden clustering resolution.
+  #   Higher value gives more clusters.
+  #   Used res = 0.55 for visium data.
+  # SEED to set.seed() for reproducibility
+  # npcs is the number of PCA dimensions to calculate
+  #
+  #### Other parameters
+  # batch = TRUE indicates batch correction is required.
+  # sample_info is a data frame where first column contains sample names
+  #   and second column contains patient/subject/group names.
+  # annots_label is name of column in colData(spe) containing cell/spot
+  #   annotations.
+  # sample_label is name of column in colData(spe) conatining sample names.
+
+  #### Preprocessing
+  print(paste("Preprocessing started.", Sys.time()))
+  if (is.null(annots_label) == FALSE) {
+    # replacing 'NA' annotated labels with 'Unknown'
+    annots = as.data.frame(as.character(spe[[annots_label]]))
+    annots[, 1] = replace_na(annots[, 1], "Unknown")
+    spe[[annots_label]] = factor(as.character(annots[, 1]))
+    print(paste("Annotated data checked - NA replaced with Unknown.", Sys.time()))
+  }
+  # Removing NA spots
+  # na_id <- which(is.na(spe$layer_guess_reordered_short))
+  # spe <- spe[, -na_id]
+  # Trimming dataset
+  imgData(spe) <- NULL
+  assay(spe, "logcounts") <- NULL
+  reducedDims(spe) <- NULL
+  rowData(spe) <- NULL
+  print(paste("Trimmed spe object.", Sys.time()))
+  # Grouping samples by source
+  spe$subject = factor(as.character(lapply(spe[[sample_label]], function(x) {
+    sample_info[sample_info[, 1] == x, 2]})))
+  print(paste("Added sample group information.", Sys.time()))
+
+  if (batch == TRUE) {
+    print(paste("Multisample run with batch correction.", Sys.time()))
+    colnames(spe) <- paste0(colnames(spe), "_", spe[[sample_label]])
+    # Staggering spatial coordinates
+    locs = spatialCoords(spe)
+    locs = cbind(locs, sample = factor(spe[[sample_label]]))
+    locs_dt = data.table(locs)
+    colnames(locs_dt) <- c("sdimx", "sdimy", "group")
+    locs_dt[, sdimx := sdimx - min(sdimx), by = group]
+    global_max = max(locs_dt$sdimx) * 1.5
+    locs_dt[, sdimx := sdimx + group * global_max]
+    locs = as.matrix(locs_dt[, 1:2])
+    rownames(locs) <- colnames(spe)
+    spatialCoords(spe) <- locs
+    print(paste("Spatial coordinates of samples staggered.", Sys.time()))
+    # Seurat
+    # Identifying HVGs
+    seu = as.Seurat(spe, data = NULL)
+    seu = FindVariableFeatures(seu, nfeatures = 2000)
+    # Normalizing data
+    scale_factor = median(colSums(assay(spe, "counts")))
+    seu = NormalizeData(seu, scale.factor = scale_factor,
+                        normalization.method = "RC")
+    # Adding data to spe object and subsetting to HVGs
+    assay(spe, "normcounts") <- GetAssayData(seu)
+    spe = spe[VariableFeatures(seu), ]
+    print(paste("Seurat feature selection and normalisation complete.", Sys.time()))
+
+    #### Running BANKSY
+    print(paste("BANKSY run started.", Sys.time()))
+    spe <- computeBanksy(spe, assay_name = "normcounts",
+                         compute_agf = compute_agf,
+                         k_geom = k_geom)
+    spe <- runBanksyPCA(spe, use_agf = use_agf, lambda = lambda,
+                        npcs = npcs, seed = SEED)
+    # Harmony batch correction
+    PCA_label = paste0("PCA_M", as.numeric(use_agf), "_lam", lambda)
+    set.seed(SEED)
+    harmony_embedding = RunHarmony(data_mat = reducedDim(spe, PCA_label),
+                                   meta_data = colData(spe),
+                                   vars_use = c(sample_label, "subject"),
+                                   max.iter = 20,
+                                   verbose = FALSE)
+    reducedDim(spe, "PCA_harmony") <- harmony_embedding
+    print(paste("Batch correction completed.", Sys.time()))
+    # Banksy clustering
+    spe = clusterBanksy(spe, dimred = "PCA_harmony", use_agf = use_agf,
+                         lambda = lambda, resolution = res, seed = SEED)
+    print(paste("BANKSY clustering completed.", Sys.time()))
+  }
+  else {
+    # separating samples into individual spe objects
+    sample_names = unique(spe[[sample_label]])
+    spe_list = lapply(sample_names, function(x) spe[, spe[[sample_label]] == x])
+    # Seurat
+    # Normalizing data
+    seu_list = lapply(spe_list, function(x) {
+      x = as.Seurat(x, data = NULL)
+      NormalizeData(x, scale.factor = 5000, normalization.method = 'RC')})
+    # Identifying HVGs
+    hvgs = lapply(seu_list, function(x) {
+      VariableFeatures(FindVariableFeatures(x, nfeatures = 2000))})
+    hvgs = Reduce(union, hvgs)
+    # Adding data to spe object and subsetting to HVGs
+    spe_list <- Map(function(spe, seu) {
+      assay(spe, "normcounts") <- GetAssayData(seu)
+      spe[hvgs,]},
+      spe_list, seu_list)
+    print(paste("Seurat feature selection and normalisation complete.", Sys.time()))
+
+    #### Running BANKSY
+    print(paste("BANKSY run started.", Sys.time()))
+    spe_list = lapply(spe_list, computeBanksy, assay_name = "normcounts",
+                      compute_agf = compute_agf, k_geom = k_geom)
+    # merging samples for downstream steps
+    spe <- do.call(cbind, spe_list)
+    spe <- runBanksyPCA(spe, use_agf = use_agf, lambda = lambda,
+                            group = sample_label, seed = SEED)
+    spe <- clusterBanksy(spe, use_agf = use_agf, lambda = lambda,
+                             resolution = res, seed = SEED)
+    print(paste("BANKSY clustering completed.", Sys.time()))
+  }
+  clust_label = names(colData(spe))[startsWith(names(colData(spe)), "clust")]
+  metrics_df = as.data.frame(colData(spe)) %>%
+    group_by(!!sym(sample_label)) %>%
+    summarise(ARI = ARI(layer_guess_reordered_short, !!sym(clust_label)),
+              NMI = NMI(layer_guess_reordered_short, !!sym(clust_label)))
+  print(paste("ARI and NMI metrics calculated.", Sys.time()))
+  clusters_df = data.frame(X = spatialCoords(spe)[, 1],
+                           Y = spatialCoords(spe)[, 2],
+                           Sample = spe[[sample_label]],
+                           Subject = spe$subject,
+                           Annotation = spe[[annots_label]],
+                           Banksy_cluster = spe[[clust_label]])
+  return(list("clusters" = clusters_df,
+              "metrics" = metrics_df,
+              "banksy_output" = spe))
 }
