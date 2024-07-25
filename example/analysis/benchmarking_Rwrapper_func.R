@@ -261,6 +261,8 @@ runMENDER <- function(python_path, pyscript_path,
               "mender_output" = mender_out))
 }
 
+
+
 # Function for running BANKSY
 runBANKSY <- function(spe, batch = TRUE, sample_info, annots_label = NULL,
                       sample_label, k_geom, lambda, res, npcs = 20,
@@ -300,9 +302,6 @@ runBANKSY <- function(spe, batch = TRUE, sample_info, annots_label = NULL,
     spe[[annots_label]] = factor(as.character(annots[, 1]))
     print(paste("Annotated data checked - NA replaced with Unknown.", Sys.time()))
   }
-  # Removing NA spots
-  # na_id <- which(is.na(spe$layer_guess_reordered_short))
-  # spe <- spe[, -na_id]
   # Trimming dataset
   imgData(spe) <- NULL
   assay(spe, "logcounts") <- NULL
