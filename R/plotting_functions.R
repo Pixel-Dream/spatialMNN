@@ -8,6 +8,8 @@
 #'
 #' @import ComplexHeatmap
 #' @import circlize
+#' @import grid
+#' @import viridis
 #'
 #' @export
 #'
@@ -16,12 +18,15 @@
 #' y_ <- sample(1:5,100,replace = T)
 #' plotConfusionMatrix(x_,y_,col_title = "Confusion Matrix")
 #'
-plotConfusionMatrix <- function(x,y,col_title = ""){
+plotConfusionMatrix <- function(x,y,col_title = "", col_pal = viridis::viridis(5)){
   na_index <- (is.na(x) | is.na(y))
   x <- x[!na_index]
   y <- y[!na_index]
-  u_x <- unique(x)
-  u_y <- unique(y)
+  if(is.null(levels(x))) u_x <- unique(x)
+  else u_x <- levels(x)
+  if(is.null(levels(y))) u_y <- unique(y)
+  else u_y <- levels(y)
+
   hm_mat <- matrix(0, nrow = length(u_x), ncol = length(u_y))
   row.names(hm_mat) <- u_x
   colnames(hm_mat) <- u_y
@@ -32,9 +37,9 @@ plotConfusionMatrix <- function(x,y,col_title = ""){
   }
   hm_mat <- hm_mat/matrix(rep(rowSums(hm_mat),ncol(hm_mat)),
                           byrow = F,nrow = nrow(hm_mat), ncol = ncol(hm_mat))
-  Heatmap(hm_mat,cluster_columns = F, cluster_rows = F,
-          col = colorRamp2(seq(0, 1,length.out=5), viridis::viridis(5)),
-          rect_gp = gpar(col = "white", lwd = 1),column_title = col_title)
+  ComplexHeatmap::Heatmap(hm_mat,cluster_columns = F, cluster_rows = F,
+          col = circlize::colorRamp2(seq(0, 1,length.out=length(col_pal)), col_pal),
+          rect_gp = grid::gpar(col = "white", lwd = 1),column_title = col_title)
 }
 
 

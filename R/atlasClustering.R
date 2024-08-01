@@ -305,6 +305,7 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @import scater
 #' @import scry
 #' @import HiClimR
+#' @import igraph
 #' @export
 #'
 #' @examples
@@ -358,8 +359,8 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   #cl_expr_obj <- RunUMAP(cl_expr_obj, dims = 1:top_pcs,verbose = F)
   if(use_glmpca){
     mat <- as.matrix(cl_expr_obj@assays$RNA$counts[VariableFeatures(object = cl_expr_obj),])
-    mat <- nullResiduals(mat, type="deviance")
-    PCA_res <- calculatePCA(mat,ncomponents = top_pcs, scale = TRUE, BSPARAM = BiocSingular::RandomParam())
+    mat <- scry::nullResiduals(mat, type="deviance")
+    PCA_res <- scater::calculatePCA(mat,ncomponents = top_pcs, scale = TRUE, BSPARAM = BiocSingular::RandomParam())
     #cl_expr_obj@reductions[["pca"]]@cell.embeddings <- res1 %>% as.matrix()
     cl_expr_obj @misc[["glmpca"]] <- PCA_res %>% as.matrix()
     #cl_expr_obj@reductions[["pca"]]@feature.loadings <- gp_res$loadings %>% as.matrix()
@@ -385,14 +386,14 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     sml_cl_idx <- names(table(cl_df[["louvain"]]))[table(cl_df[["louvain"]]) < 2]
     cl_df[["louvain"]][cl_df[["louvain"]] %in% sml_cl_idx] <- NA
   }else if(method == "MNN"){
-    g <- make_empty_graph(directed = F)
+    g <- igraph::make_empty_graph(directed = F)
     node_df <- data.frame(ID=seq_along(colnames(cl_expr_obj)),
                           cl = colnames(cl_expr_obj),
                           sample = cl_expr_obj$orig.ident,
                           row.names = colnames(cl_expr_obj))
-    g <- add_vertices(g, nrow(node_df))
-    V(g)$cl <- node_df$cl
-    V(g)$sample <- node_df$sample
+    g <- igraph::add_vertices(g, nrow(node_df))
+    igraph::V(g)$cl <- node_df$cl
+    igraph::V(g)$sample <- node_df$sample
 
     # Enable MNN within sample
     if(rare_ct == "m"){
@@ -452,6 +453,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     louvain_res <- cluster_louvain(g, resolution = resolution)
 
     cl_df[["louvain"]] <- as.character(louvain_res$membership)
+    cl_df[["raw_louvain"]] <- cl_df[["louvain"]]
     sml_cl_idx <- names(table(cl_df[["louvain"]]))[table(cl_df[["louvain"]]) < 2]
     cl_df[["louvain"]][cl_df[["louvain"]] %in% sml_cl_idx] <- NA
     if(rare_ct == "a"){

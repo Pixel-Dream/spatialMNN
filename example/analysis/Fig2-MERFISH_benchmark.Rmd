@@ -5,6 +5,8 @@ date: "2024-05-10"
 output: html_document
 ---
 
+DOI: https://doi.org/10.1016/j.cell.2022.12.010
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(atlasClustering)
