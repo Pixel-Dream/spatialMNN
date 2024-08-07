@@ -1,6 +1,8 @@
 # IMPORTANT: requires python 3.8
 import os
+from memory_profiler import profile
 import sys
+import time
 import random
 import scanpy as sc
 import numpy as np
@@ -43,6 +45,8 @@ def nscluster(in_adata):
     in_adata.X = in_adata.layers["counts"].copy()
     return in_adata
 
+# instantiation of decorator function
+@profile
 
 def slat_run(file_list, cos = 0.3):
     # Function to run slat alignment
@@ -51,6 +55,8 @@ def slat_run(file_list, cos = 0.3):
     # Remaining slices are aligned to the 
     # reference and cluster labels are borrowed 
     # from it.
+    
+    startTime = time.time()
     
     adata_list = load_sample(file_list)
     adata_list[0] = nscluster(adata_list[0])
@@ -70,4 +76,7 @@ def slat_run(file_list, cos = 0.3):
         clust_query.index = query_ad.obs_names.copy()
         query_ad.obs['clust_ref'] = clust_query
         clust_out.append(clust_query)
+    
+    endTime = time.time()
+    print("Time elapsed =", endTime - startTime, "seconds") 
     return adata_list

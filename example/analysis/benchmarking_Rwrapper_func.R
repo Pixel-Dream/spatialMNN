@@ -154,7 +154,7 @@ runSLAT <- function(python_path, pyscript_path,
     run1_names = paste0("Run1", "-", sl)
     tmp_df = data.frame(X = mega_List[[run1_names]]$obsm$spatial[,1],
                         Y = mega_List[[run1_names]]$obsm$spatial[,2],
-                        Cells_barcode = mega_List[[run1_names]]$obs_names,
+                        Cell = mega_List[[run1_names]]$obs_names,
                         Sample = mega_List[[run1_names]]$obs[[sampleIDs]],
                         Annotation = mega_List[[run1_names]]$obs[[domains]])
     for (i in 1:length(sampleNames_vec)) {
@@ -170,9 +170,8 @@ runSLAT <- function(python_path, pyscript_path,
     nmi_df = rbind(nmi_df, nmi_vec)
     print(paste0("Cluster and metrics information gathered for ", sl, ". ", Sys.time()))
   }
-  colnames(clusters_df) <- c("X", "Y", "Cells_barcode", "Sample",
-                                  "Annotation", paste0("SLATcluster-ref",
-                                                       sampleNames_vec))
+  colnames(clusters_df) <- c("X", "Y", "Cell", "Sample", "Annotation",
+                             paste0("SLATcluster_ref", sampleNames_vec))
   colnames(ari_df) <- c(paste0("SLAT_ref", sampleNames_vec))
   colnames(nmi_df) <- c(paste0("SLAT_ref", sampleNames_vec))
   row.names(ari_df) <- sampleNames_vec
@@ -242,7 +241,7 @@ runMENDER <- function(python_path, pyscript_path,
                  str_split_i(as.vector(mender_out$obs_names), pattern = "-", i = 2))
   clusters_df = data.frame(X = mender_out$obsm$spatial[, 1],
                                   Y = mender_out$obsm$spatial[, 2],
-                                  Cells_barcode = cells,
+                                  Cell = cells,
                                   Sample = mender_out$obs[[sampleIDs]],
                                   Annotation = mender_out$obs[[domains]],
                                   Initial_leiden = mender_out$obs$ct,
@@ -403,6 +402,7 @@ runBANKSY <- function(spe, batch = TRUE, sample_info, annots_label = NULL,
   print(paste("ARI and NMI metrics calculated.", Sys.time()))
   clusters_df = data.frame(X = spatialCoords(spe)[, 1],
                            Y = spatialCoords(spe)[, 2],
+                           Cell = colnames(spe),
                            Sample = spe[[sample_label]],
                            Subject = spe$subject,
                            Annotation = spe[[annots_label]],
