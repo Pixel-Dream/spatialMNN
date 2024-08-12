@@ -45,6 +45,9 @@ def nscluster_batch(in_adata, batch):
 
 def mender_run(file_list, scale, mode, radius, nSeed, batch, msm_res):
     # function to perform mender
+    
+    startTime = time.time()
+    
     adata_list = load_sample(file_list)
     print("Data loaded.")
     # merge all anndata files
@@ -71,5 +74,7 @@ def mender_run(file_list, scale, mode, radius, nSeed, batch, msm_res):
     # set the spatial clustering parameter
     msm.run_clustering_normal(msm_res)
     print("Mender clustering performed.")
+    
+    print("Time elapsed =", time.time() - startTime, "seconds")
     return msm.adata_MENDER
     
