@@ -16,7 +16,8 @@ require(data.table)
 # Function for creating anndata objects for
 # each sample in spe object and saving as h5ad files.
 create_annFiles <- function(spe, annots_label, sample_label,
-                            fileSavepath, genePanel = TRUE) {
+                            fileSavepath, batch = TRUE,
+                            genePanel = TRUE) {
 
   # ####  Options explanation
   # spe = spe object containing gene expressions of
@@ -30,30 +31,34 @@ create_annFiles <- function(spe, annots_label, sample_label,
   spe = logNormCounts(spe)
   if (genePanel == TRUE) {
     spe = runPCA(spe)
-    reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
-                                                          colData(spe), 'sample')
+    if (batch == TRUE) {
+      reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
+                                                            colData(spe), sample_label)
+    }
   } else { # for data from whole transcriptome identify top 2000 HVGs
     seu = as.Seurat(spe)
     seu = FindVariableFeatures(seu, nfeatures = 2000)
     spe = spe[VariableFeatures(seu), ]
     spe = runPCA(spe)
-    reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
-                                                          colData(spe), 'sample')
+    if (batch == TRUE) {
+      reducedDim(spe, "PCA_harmony") <- harmony::RunHarmony(reducedDim(spe, "PCA"),
+                                                          colData(spe), sample_label)
+    }
   }
 
   # generating h5ad file for each sample
   samplePaths_vec = c()
   sampleNames_vec = c()
-  samples = unique(spe$sample)
+  samples = unique(spe[[sample_label]])
   for (i in samples) {
-    speX = spe[, spe$sample == i]
+    speX = spe[, spe[[sample_label]] == i]
     sample = paste0("sample_", i)
     spCoords = as.data.frame(spatialCoords(speX))
     rownames(spCoords) = NULL
     colnames(spCoords) = NULL
     count_val = t(counts(speX))
     log_val = t(logcounts(speX))
-    metaData = data.frame(domainAnnotations = as.character(colData(speX)[, annots]),
+    metaData = data.frame(domainAnnotations = as.character(speX[[annots_label]]),
                           sampleID = rep(sample, times = nrow(spCoords)),
                           row.names = rownames(colData(speX)))
     metaData$domainAnnotations <- metaData$domainAnnotations %>% replace_na("Unknown")
@@ -61,16 +66,28 @@ create_annFiles <- function(spe, annots_label, sample_label,
     # X is a matrix
     # obs is a data frame
     # obsm and layers are lists of matrices
-    ad = AnnData(
-      X = t(counts(speX)),
-      obs = metaData,
-      obsm = list(
-        spatial = as.matrix(spCoords),
-        X_pca = reducedDim(speX, "PCA"),
-        X_pca_harmony = reducedDim(speX, "PCA_harmony")
-      ),
-      layers = list(
-        logcounts = t(logcounts(speX))))
+    if (batch == TRUE) {
+      ad = AnnData(
+        X = t(counts(speX)),
+        obs = metaData,
+        obsm = list(
+          spatial = as.matrix(spCoords),
+          X_pca = reducedDim(speX, "PCA"),
+          X_pca_harmony = reducedDim(speX, "PCA_harmony")
+        ),
+        layers = list(
+          logcounts = t(logcounts(speX))))
+    } else if (batch == FALSE) {
+      ad = AnnData(
+        X = t(counts(speX)),
+        obs = metaData,
+        obsm = list(
+          spatial = as.matrix(spCoords),
+          X_pca = reducedDim(speX, "PCA")
+        ),
+        layers = list(
+          logcounts = t(logcounts(speX))))
+    }
     write_h5ad(ad, paste0(fileSavepath, sample, ".h5ad"))
     samplePaths_vec = append(samplePaths_vec, paste0(fileSavepath, sample, ".h5ad"))
     sampleNames_vec = append(sampleNames_vec, sample)
@@ -159,11 +176,14 @@ runSLAT <- function(python_path, pyscript_path,
                         Annotation = mega_List[[run1_names]]$obs[[domains]])
     for (i in 1:length(sampleNames_vec)) {
       slice_name = paste0("Run", i, "-", sl)
-      tmp_df = cbind(tmp_df, cluster = mega_List[[slice_name]]$obs$clust_ref)
-      ari_vec = c(ari_vec, as.numeric(ARI(mega_List[[slice_name]]$obs[[domains]],
-                                          mega_List[[slice_name]]$obs$clust_ref)))
-      nmi_vec = c(nmi_vec, as.numeric(NMI(mega_List[[slice_name]]$obs[[domains]],
-                                          mega_List[[slice_name]]$obs$clust_ref)))
+      tmp_df = cbind(tmp_df,
+                     cluster = mega_List[[slice_name]]$obs$clust_ref)
+      ari_vec = c(ari_vec,
+                  as.numeric(ARI(mega_List[[slice_name]]$obs[[domains]],
+                                 mega_List[[slice_name]]$obs$clust_ref)))
+      nmi_vec = c(nmi_vec,
+                  as.numeric(NMI(mega_List[[slice_name]]$obs[[domains]],
+                                 mega_List[[slice_name]]$obs$clust_ref)))
     }
     clusters_df = rbind(clusters_df, tmp_df)
     ari_df = rbind(ari_df, ari_vec)
@@ -240,12 +260,12 @@ runMENDER <- function(python_path, pyscript_path,
                  "-",
                  str_split_i(as.vector(mender_out$obs_names), pattern = "-", i = 2))
   clusters_df = data.frame(X = mender_out$obsm$spatial[, 1],
-                                  Y = mender_out$obsm$spatial[, 2],
-                                  Cell = cells,
-                                  Sample = mender_out$obs[[sampleIDs]],
-                                  Annotation = mender_out$obs[[domains]],
-                                  Initial_leiden = mender_out$obs$ct,
-                                  MENDER_leiden = mender_out$obs$MENDER)
+                           Y = mender_out$obsm$spatial[, 2],
+                           Cell = cells,
+                           Sample = mender_out$obs[[sampleIDs]],
+                           Annotation = mender_out$obs[[domains]],
+                           Initial_leiden = mender_out$obs$ct,
+                           MENDER_leiden = mender_out$obs$MENDER)
   metrics_df = clusters_df %>%
     group_by(Sample = as.character(clusters_df$Sample)) %>%
     summarise(ARI = ARI(Annotation, MENDER_leiden),
@@ -394,11 +414,11 @@ runBANKSY <- function(spe, batch = TRUE, sample_info, annots_label = NULL,
                              resolution = res, seed = SEED)
     print(paste("BANKSY clustering completed.", Sys.time()))
   }
-  clust_label = names(colData(spe))[startsWith(names(colData(spe)), "clust")]
+  clust_label = names(colData(spe))[startsWith(names(colData(spe)), "clust_PCA")]
   metrics_df = as.data.frame(colData(spe)) %>%
     group_by(!!sym(sample_label)) %>%
-    summarise(ARI = ARI(layer_guess_reordered_short, !!sym(clust_label)),
-              NMI = NMI(layer_guess_reordered_short, !!sym(clust_label)))
+    summarise(ARI = ARI(!!sym(annots_label), !!sym(clust_label)),
+              NMI = NMI(!!sym(annots_label), !!sym(clust_label)))
   print(paste("ARI and NMI metrics calculated.", Sys.time()))
   clusters_df = data.frame(X = spatialCoords(spe)[, 1],
                            Y = spatialCoords(spe)[, 2],
