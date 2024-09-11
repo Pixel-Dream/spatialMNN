@@ -38,6 +38,28 @@ for(i in names(starmap_cnts)){
   seurat_ls[[i]]$col <- seurat_ls[[i]]$y
 }
 
+# convert to spe obj
+library(SpatialExperiment)
+library(SingleCellExperiment)
+
+
+sce_ls <- lapply(seurat_ls, function(x) {as.SingleCellExperiment(x)})
+
+combined_sce <- do.call(cbind, sce_ls)
+
+# Convert the combined SCE object to a SpatialExperiment object
+spe <- SpatialExperiment(
+  assays = list(counts = assay(combined_sce, "counts")),
+  rowData = rowData(combined_sce),
+  colData = colData(combined_sce),
+  reducedDims = reducedDims(combined_sce),
+  spatialCoords = matrix(c(combined_sce@colData@listData[["x"]],
+                           combined_sce@colData@listData[["y"]]),
+                         ncol = 2, 
+                         dimnames = list(combined_sce@colData@rownames,c("x","y"))) # Adjust this if you have spatial coordinates
+)
+
+
 
 ```
 
@@ -63,7 +85,7 @@ for(i in names(seurat_ls)){
                                                 pal = RColorBrewer::brewer.pal(4,"Set1"),
                                                 flip = F)
 }
-
+saveRDS(fig_ls,"~/GitHub/atlasClustering/archived/STARmap_groundtruth.rds")
 ```
 
 

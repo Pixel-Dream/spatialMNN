@@ -67,7 +67,7 @@ for(i in names(seurat_ls)){
                                                 pal = RColorBrewer::brewer.pal(8,"Set1"),
                                                 flip = T)
 }
-
+#saveRDS(fig_ls,"~/GitHub/atlasClustering/archived/MERFISH_groundtruth.rds")
 ```
 
 
@@ -78,26 +78,35 @@ for(i in names(seurat_ls)){
 mem_usage <- peakRAM(
       {
         tic <- Sys.time()
-        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.8, nn = 8, nn_2=20, cl_resolution = 10,
-                             top_pcs = 10, cl_min=5, find_HVG = F, cor_met = "PC",
-                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 8)
+        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 12, cl_resolution = 10,
+                             top_pcs = 5, cl_min = 10, find_HVG = F, cor_met = "PC",
+                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 16)
         
         rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
-                          rtn_seurat = T, nn_2 = 10, method = "MNN",
-                          top_pcs = 10, use_glmpca = T, rare_ct = "m", resolution = 1)
+                          rtn_seurat = T, nn_2 = 50, method = "MNN", find_HVG = F,
+                          top_pcs = 10, use_glmpca = T, rare_ct = "none", resolution = 2)
         
         seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.8, cl_key = "merged_cluster")
         toc <- Sys.time()
       }
 )
 
-bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"atlasClustering",seurat_ls,"tissue","sec_cluster_MNN")
+bench_res <- rkd_res(bench_res,tic,toc,list(Peak_RAM_Used_MiB = 10000),"atlasClustering",seurat_ls,"tissue","sec_cluster_MNN")
 
 for(i in names(seurat_ls)){
   fig_ls[[paste0("AC_",i)]] <- draw_slide_bench(seurat_ls[[i]]$coord_x,
                                                 seurat_ls[[i]]$coord_y,
                                                 seurat_ls[[i]]$sec_cluster_MNN,"atlasClustering",i,flip = T)
 }
+slide_ls <- list()
+
+for(i in names(seurat_ls)){
+  i = names(seurat_ls)[1]
+  slide_ls[[paste0("AC_",i)]] <- draw_slide_graph(seurat_ls[[i]]@meta.data,
+                                                  seurat_ls[[i]]@misc[["edges"]],
+                                                  0.8, "tissue")
+}
+
 
 ```
 

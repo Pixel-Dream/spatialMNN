@@ -38,7 +38,7 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
   if(find_HVG){
     seu_obj <- NormalizeData(seu_obj)
     stopifnot("HVG# Exceeded" = hvg <= nrow(seu_obj))
-    seu_obj <- FindVariableFeatures(seu_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
+    seu_obj <- FindVariableFeatures(seu_obj, selection.method = "vst", nfeatures = hvg, verbose = F)
   }else{
     VariableFeatures(object = seu_obj) <- row.names(seu_obj)
     hvg <- nrow(seu_obj)
@@ -293,6 +293,7 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @param rtn_seurat Return a Seurat object with averaged expression profile and integrative clustering results
 #' @param method Secondary Clustering algorithm, available methods:`("Louvain","MNN")`
 #' @param hly_cor Threshold for highly correlated clusters
+#' @param find_HVG Whether find HVG for downstream analysis or use full gene list
 #' @param hvg HVG number for secondary clustering
 #' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param use_glmpca Use GLMPCA or regular PCA
@@ -311,7 +312,7 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @examples
 #' TBD
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
-                    rtn_seurat = F, method="louvain", hly_cor = 0.9, hvg = 2000, cor_met = "PC",
+                    rtn_seurat = F, method="louvain", hly_cor = 0.9, find_HVG = T, hvg = 2000, cor_met = "PC",
                     use_glmpca = F, resolution = 1,
                     rare_ct="none", verbose = F){
   tic <- Sys.time()
@@ -347,16 +348,16 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     else cl_expr[i,] <-  seu_ls[[cl_df$sample[i]]]@assays[["RNA"]]$counts[hvg_union,idx] # CH: change @data to counts
   }
 
-  #cl_expr_obj <- CreateSeuratObject(t(cl_expr),verbose = F)
-  #cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg,verbose = F)
-  #cl_expr_obj <- ScaleData(cl_expr_obj, features = rownames(cl_expr_obj),verbose = F)
-  cl_expr_obj <- CreateSeuratObject(t(cl_expr))
-  cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg, verbose = F)
-  #cl_expr_obj <- NormalizeData(cl_expr_obj, verbose = F)
-  #cl_expr_obj@assays[["RNA"]]@layers[["data"]] <- cl_expr_obj@assays[["RNA"]]@layers[["counts"]]
-  #cl_expr_obj <- ScaleData(cl_expr_obj, features = rownames(cl_expr_obj),verbose = F)
-  #cl_expr_obj <- RunPCA(cl_expr_obj, features = VariableFeatures(object = cl_expr_obj),verbose = F)
-  #cl_expr_obj <- RunUMAP(cl_expr_obj, dims = 1:top_pcs,verbose = F)
+  cl_expr_obj <- CreateSeuratObject(t(cl_expr), meta.data = data.frame(row.names = row.names(cl_expr), cl_df))
+
+  if(find_HVG){
+    cl_expr_obj <- NormalizeData(cl_expr_obj)
+    stopifnot("HVG# Exceeded" = hvg <= nrow(cl_expr_obj))
+    cl_expr_obj <- FindVariableFeatures(cl_expr_obj, selection.method = "vst", nfeatures = hvg, verbose = F)
+  }else{
+    VariableFeatures(object = cl_expr_obj) <- row.names(cl_expr_obj)
+  }
+
   if(use_glmpca){
     mat <- as.matrix(cl_expr_obj@assays$RNA$counts[VariableFeatures(object = cl_expr_obj),])
     mat <- scry::nullResiduals(mat, type="deviance")
@@ -395,11 +396,12 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
     igraph::V(g)$cl <- node_df$cl
     igraph::V(g)$sample <- node_df$sample
 
+    all_samples <- unique(cl_expr_obj@meta.data[["sample"]])
     # Enable MNN within sample
     if(rare_ct == "m"){
-      mnn_seq <- seq_along(levels(cl_expr_obj@meta.data[["orig.ident"]]))
+      mnn_seq <- seq_along(all_samples)
     }else{
-      mnn_seq <- seq_along(levels(cl_expr_obj@meta.data[["orig.ident"]]))[-1]
+      mnn_seq <- seq_along(all_samples)[-1]
     }
 
     for(i in mnn_seq){
@@ -410,9 +412,9 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
       }
       for(j in mnn_seq2){
         #message(paste(i,j))
-        idx_i <- cl_expr_obj@meta.data[["orig.ident"]] == levels(cl_expr_obj@meta.data[["orig.ident"]])[i]
+        idx_i <- cl_expr_obj@meta.data[["sample"]] == all_samples[i]
 
-        idx_j <- cl_expr_obj@meta.data[["orig.ident"]] == levels(cl_expr_obj@meta.data[["orig.ident"]])[j]
+        idx_j <- cl_expr_obj@meta.data[["sample"]] == all_samples[j]
 
         if(cor_met == "PC"){
           mat_i <- as.matrix(PCA_res[idx_i,1:top_pcs])
@@ -446,11 +448,12 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                           paste(row_id[k],tmp_vec) %>% str_split(pattern = " ") %>% unlist() %>% as.numeric())
           }
         }
-        g <- add.edges(g,edges = edge_vec)
+        g <- igraph::add.edges(g,edges = edge_vec)
 
       }
     }
-    louvain_res <- cluster_louvain(g, resolution = resolution)
+
+    louvain_res <- igraph::cluster_louvain(g, resolution = resolution)
 
     cl_df[["louvain"]] <- as.character(louvain_res$membership)
     cl_df[["raw_louvain"]] <- cl_df[["louvain"]]
@@ -487,8 +490,10 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
   #
   #                          })
   toc <- Sys.time()
-  message("Elasped Time(sec):")
-  message(toc - tic)
+  if(verbose){
+    message("Elasped Time:")
+    message(format(difftime(toc, tic, units='secs'),digits = 3))
+  }
   if(rtn_seurat){
     if(method == "MNN") list(seurat_obj = cl_expr_obj, cl_df = cl_df, g=g)
     else list(seurat_obj = cl_expr_obj, cl_df = cl_df)
