@@ -2,6 +2,8 @@
 import warnings
 warnings.filterwarnings("ignore")
 import time
+import os
+from memory_profiler import profile
 # from pathlib import Path
 # from operator import itemgetter
 import scanpy as sc
@@ -38,8 +40,14 @@ def nscluster_batch(in_adata, batch):
     in_adata.obs['ct'] = in_adata.obs['ct'].astype('category')
     return in_adata
 
+# instantiation of decorator function
+@profile
+
 def mender_run(file_list, scale, mode, radius, nSeed, batch, msm_res):
     # function to perform mender
+    
+    startTime = time.time()
+    
     adata_list = load_sample(file_list)
     print("Data loaded.")
     # merge all anndata files
@@ -66,5 +74,7 @@ def mender_run(file_list, scale, mode, radius, nSeed, batch, msm_res):
     # set the spatial clustering parameter
     msm.run_clustering_normal(msm_res)
     print("Mender clustering performed.")
+    
+    print("Time elapsed =", time.time() - startTime, "seconds")
     return msm.adata_MENDER
     

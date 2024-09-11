@@ -1,6 +1,8 @@
 # IMPORTANT: requires python 3.8
 import os
+from memory_profiler import profile
 import sys
+import time
 import random
 import scanpy as sc
 import numpy as np
@@ -43,6 +45,8 @@ def nscluster(in_adata):
     in_adata.X = in_adata.layers["counts"].copy()
     return in_adata
 
+# instantiation of decorator function
+@profile
 
 def slat_run(file_list, cos = 0.3):
     # Function to run slat alignment
@@ -52,22 +56,36 @@ def slat_run(file_list, cos = 0.3):
     # reference and cluster labels are borrowed 
     # from it.
     
+    startTime = time.time()
+    
     adata_list = load_sample(file_list)
     adata_list[0] = nscluster(adata_list[0])
     #### multislice runs - Aligning multiple datsets
     matching_list, zip_res = run_SLAT_multi(adata_list, cos_cutoff = cos, n_jobs = 1) 
     #### borrowing labels
     adata_list[0].obs['clust_ref'] = adata_list[0].obs['leiden'].copy()
-    clust_out = [adata_list[0].obs['leiden'].copy()]
     for ad_num in range(len(adata_list)-1):
         ref_ad = adata_list[ad_num]
         query_ad = adata_list[ad_num + 1]
         match_index = matching_list[ad_num][1]
-        if len(match_index) < query_ad.shape[0]:
-            print("Not all matches found for reference", ad_num + 1)
         clust_ref = ref_ad.obs['clust_ref'].copy()
-        clust_query = clust_ref[ref_ad.obs_names[match_index[0:]]]
-        clust_query.index = query_ad.obs_names.copy()
+        if len(match_index) < query_ad.shape[0]:
+            print("Not all matches found for query", ad_num + 1)
+            for i in range(query_ad.shape[0]):
+                if i not in matching_list[ad_num][0]:
+                    match_index = np.insert(match_index, i, 1000000)
+            clust_query = []
+            for j in range(len(match_index)):
+                if match_index[j] == 1000000:
+                    clust_query.append("NA")
+                else:
+                    clust_query.append(clust_ref[ref_ad.obs_names[match_index[j]]])
+            clust_query = pd.Series(clust_query)
+            clust_query.index = query_ad.obs_names.copy()
+        else:
+            clust_query = clust_ref[ref_ad.obs_names[match_index[0:]]]
+            clust_query.index = query_ad.obs_names.copy()
         query_ad.obs['clust_ref'] = clust_query
-        clust_out.append(clust_query)
+    
+    print("Time elapsed =", time.time() - startTime, "seconds") 
     return adata_list

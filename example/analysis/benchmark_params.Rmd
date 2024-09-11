@@ -1,0 +1,107 @@
+---
+title: "spatialMNN benchmarking"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+chunk_output_type: console
+```
+
+# SLAT runs on anndata files
+
+```{r}
+# visium dlpfc
+res_slat_visium = runSLAT(python_path = slat_python_path, 
+                          pyscript_path = slat_pyscript_path,
+                          samplePaths_vec = visium_list, 
+                          sampleNames_vec = visium_slices,
+                          sampleIDs = 'sampleID',
+                          domains = 'domainAnnotations',
+                          cos = 0.3)
+
+# starmap mouse brain
+res_slat_starmap = runSLAT(python_path = slat_python_path, 
+                           pyscript_path = slat_pyscript_path,
+                           samplePaths_vec = starmap_list, 
+                           sampleNames_vec = starmap_slices,
+                           sampleIDs = 'sampleID',
+                           domains = 'domainAnnotations',
+                           cos = 0.3)
+
+# merfish mouse brain
+res_slat_merfish = runSLAT(python_path = slat_python_path, 
+                           pyscript_path = slat_pyscript_path,
+                           samplePaths_vec = merfish_list, 
+                           sampleNames_vec = merfish_slices,
+                           sampleIDs = 'sampleID',
+                           domains = 'domainAnnotations',
+                           cos = 0.3)
+```
+
+# MENDER runs on anndata files
+
+```{r}
+# visium dlpfc
+res_mender_visium = runMENDER(python_path = mender_python_path, 
+                              pyscript_path = mender_pyscript_path,
+                              samplePaths_vec = visium_hvgs_list, 
+                              sampleNames_vec = visium_hvgs_slices,
+                              sampleIDs = 'sampleID',
+                              domains = 'domainAnnotations',
+                              scale = 6, mode = 'ring', radius = 6,
+                              seed = 101, batch = 'True', msm_res = -0.2)
+
+# starmap mouse brain
+res_mender_starmap = runMENDER(python_path = mender_python_path, 
+                               pyscript_path = mender_pyscript_path,
+                               samplePaths_vec = starmap_list, 
+                               sampleNames_vec = starmap_slices,
+                               sampleIDs = 'sampleID',
+                               domains = 'domainAnnotations',
+                               scale = 6, mode = 'radius', radius = 150,
+                               seed = 101, batch = 'False', msm_res = -0.5)
+
+# merfish mouse brain
+res_mender_merfish = runMENDER(python_path = mender_python_path, 
+                               pyscript_path = mender_pyscript_path,
+                               samplePaths_vec = merfish_list,
+                               sampleNames_vec = merfish_slices,
+                               sampleIDs = 'sampleID',
+                               domains = 'domainAnnotations',
+                               scale = 6, mode = 'radius', radius = 15,
+                               seed = 101, batch = 'True', msm_res = -0.5)
+```
+
+# BANKSY runs on spatialExperiment objects
+
+```{r}
+# visium dlpfc
+res_banksy_visium = runBANKSY(spe_visium, batch = TRUE, 
+                              sample_info = sample_info_visium, 
+                              annots_label = 'layer_guess_reordered_short',
+                              sample_label = 'sample', 
+                              k_geom = 18, lambda = 0.2, res = 0.55, 
+                              npcs = 20, SEED = 1000, 
+                              compute_agf = TRUE, use_agf = TRUE)
+
+# starmap mouse brain
+res_banksy_starmap = runBANKSY(spe_starmap, batch = TRUE, 
+                               sample_info = sample_info_starmap, 
+                               annots_label = 'c',
+                               sample_label = 'sample', 
+                               k_geom = 30, lambda = 0.8, res = 0.8, 
+                               npcs = 50, SEED = 1000, 
+                               compute_agf = TRUE, use_agf = TRUE)
+
+# merfish mouse brain
+res_banksy_merfish = runBANKSY(spe_merfish, batch = TRUE, 
+                               sample_info = sample_info_merfish, 
+                               annots_label = 'tissue',
+                               sample_label = 'Samples', 
+                               k_geom = 30, lambda = 0.8, res = 1, 
+                               npcs = 20, SEED = 1000, 
+                               compute_agf = TRUE, use_agf = TRUE)
+```
