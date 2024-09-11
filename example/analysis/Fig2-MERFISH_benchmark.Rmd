@@ -83,10 +83,10 @@ mem_usage <- peakRAM(
                              edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 16)
         
         rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
-                          rtn_seurat = T, nn_2 = 50, method = "MNN", find_HVG = F,
+                          rtn_seurat = T, nn_2 = 20, method = "MNN", find_HVG = F,
                           top_pcs = 10, use_glmpca = T, rare_ct = "none", resolution = 2)
         
-        seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.8, cl_key = "merged_cluster")
+        seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
         toc <- Sys.time()
       }
 )

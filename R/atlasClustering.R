@@ -516,6 +516,7 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 #'
 #' @import scater
 #' @import scry
+#' @import dplyr
 #'
 #' @export
 #'
@@ -526,10 +527,10 @@ assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
   # Assign secondary clustering label
   for(i in names(seu_ls)){
     #message(i)
-    seu_ls[[i]]@meta.data[[paste0("sec_cluster_",anno)]] <- apply(seu_ls[[i]]@meta.data,1,
-                                                                FUN = function(x){
-                                                                  cl_df$louvain[cl_df$sample==i & cl_df$cluster==x[[cl_key]]]
-                                                                })
+    meta_df <- data.frame(cell_id = as.character(row.names(seu_ls[[i]]@meta.data)),
+                          cluster = seu_ls[[i]]@meta.data[[cl_key]])
+    meta_df <- dplyr::left_join(meta_df, subset(cl_df, sample == i), by = "cluster")
+    seu_ls[[i]]@meta.data[[paste0("sec_cluster_",anno)]] <- meta_df$louvain
     seu_ls[[i]]@misc[[paste0("graph_plot_cluster_sec_",anno)]] <-
       draw_slide_graph(seu_ls[[i]]@meta.data,seu_ls[[i]]@misc[["edges"]],
                        cor_threshold,paste0("sec_cluster_",anno)) +
