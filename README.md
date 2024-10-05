@@ -1,2 +1,3 @@
-# altlasClustering
-The R package of 'Scalable Two-level Spatial Clustering for Integrative Analysis of Multi-sample SRT Data'
+# spatialMNN
+The R package for 'Spatial mutual nearest neighbors for spatial transcriptomics data'
+

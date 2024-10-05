@@ -26,10 +26,6 @@
 #' @import DescTools
 #' @import HiClimR
 #' @importFrom dbscan kNN
-#'
-#'
-#' @examples
-#' TBD
 
 stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                        top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
@@ -166,7 +162,7 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
 
 
 #' Niche Identification
-#' Main function ??
+#'
 #'
 #' @param seu_ls A list of Seurat Objects, columns `coord_x,coord_y` must be included in the `meta.data`
 #' @param cor_threshold Threshold for edge pruning
@@ -180,6 +176,7 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
 #' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param edge_smoothing Perform smoothed edge detection
 #' @param use_glmpca Use GLMPCA or regular PCA
+#' @param num_core Number of cores for parallel processing
 #' @param verbose Output clustering information
 #'
 #' @return A list of Seurat Objects
@@ -195,7 +192,16 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
 #' @export
 #'
 #' @examples
-#' TBD
+#' spe <- readRDS("/users/hzhou1/benchmark/datasets/DLPFC_spe.RDS")
+#' seurat_ls <- spe2SeuList(spe,
+#'                         sample_id = "sample_id",
+#'                         sel_assay = "counts",
+#'                         sel_col = c("layer_guess_reordered_short","spatialLIBD"),
+#'                         col_name = c("layer","spatialLIBD"))
+#' stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+#'         top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+#'         edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 1)
+
 stage_1 <- function(seu_ls, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolution = 10,
                     top_pcs = 30, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                     edge_smoothing = T, use_glmpca = T, num_core = 1, verbose = F){
@@ -310,7 +316,20 @@ louvain_w_cor <- function(cor_mat_, nn_=10, res_ = 1){
 #' @export
 #'
 #' @examples
-#' TBD
+#' spe <- readRDS("/users/hzhou1/benchmark/datasets/DLPFC_spe.RDS")
+#' seurat_ls <- spe2SeuList(spe,
+#'                         sample_id = "sample_id",
+#'                         sel_assay = "counts",
+#'                         sel_col = c("layer_guess_reordered_short","spatialLIBD"),
+#'                         col_name = c("layer","spatialLIBD"))
+#' stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+#'         top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+#'         edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 1)
+#'
+#' stage_2(seurat_ls, cl_key = "merged_cluster",
+#'        rtn_seurat = T, nn_2 = 10, method = "MNN",
+#'        top_pcs = 8, use_glmpca = T, rare_ct = "m", resolution = 1)
+
 stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
                     rtn_seurat = F, method="louvain", hly_cor = 0.9, find_HVG = T, hvg = 2000, cor_met = "PC",
                     use_glmpca = F, resolution = 1,
@@ -521,7 +540,22 @@ stage_2 <- function(seu_ls, top_pcs = 30, nn_2=10, cl_key = "merged_cluster",
 #' @export
 #'
 #' @examples
-#' TBD
+#' spe <- readRDS("/users/hzhou1/benchmark/datasets/DLPFC_spe.RDS")
+#' seurat_ls <- spe2SeuList(spe,
+#'                         sample_id = "sample_id",
+#'                         sel_assay = "counts",
+#'                         sel_col = c("layer_guess_reordered_short","spatialLIBD"),
+#'                         col_name = c("layer","spatialLIBD"))
+#' stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
+#'         top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
+#'         edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 1)
+#'
+#' stage_2(seurat_ls, cl_key = "merged_cluster",
+#'        rtn_seurat = T, nn_2 = 10, method = "MNN",
+#'        top_pcs = 8, use_glmpca = T, rare_ct = "m", resolution = 1)
+#'
+#' assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+
 assign_label <- function(seu_ls, cl_df, anno, cor_threshold,
                          cl_key = "merged_cluster"){
   # Assign secondary clustering label
