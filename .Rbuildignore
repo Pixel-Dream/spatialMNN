@@ -2,3 +2,6 @@
 ^\.Rproj\.user$
 ^atlasClustering\.Rproj$
 ^atlasClustering\example$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
