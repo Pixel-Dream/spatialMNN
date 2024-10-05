@@ -180,6 +180,7 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
 #' @param cor_met Correlation calculation method, available methods:`("PC","HVG")`
 #' @param edge_smoothing Perform smoothed edge detection
 #' @param use_glmpca Use GLMPCA or regular PCA
+#' @param num_core Number of cores for parallel processing
 #' @param verbose Output clustering information
 #'
 #' @return A list of Seurat Objects
