@@ -15,7 +15,6 @@ knitr::opts_chunk$set(
 ```
 
 ```{r setup}
-# Import packages
 library(atlasClustering)
 library(spatialLIBD)
 library(Seurat)
@@ -25,11 +24,7 @@ library(ggnewscale) # for new_scale_colour()
 library(igraph)
 library(scry)
 library(scater)
-library(ggpubr)
-
-# set seed
-set.seed(12345)
-
+options(future.globals.maxSize = 4000 * 1024^2)
 ```
 
 
@@ -37,13 +32,13 @@ set.seed(12345)
 
 ```{r Download Data}
 # ## Connect to ExperimentHub
-# ehub <- ExperimentHub::ExperimentHub()
+ehub <- ExperimentHub::ExperimentHub()
 # ## Download the small example sce data
-# spe <- fetch_data(type = "spe", eh = ehub)
+spe <- fetch_data(type = "spe", eh = ehub)
 
 ## You may save the spe object and load from local
 # saveRDS(spe,"/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
-spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
+# spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering/data/DLPFC_spe.RDS")
 
 #saveRDS(spe,"/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
 #spe <- readRDS("/Users/zhouhaowen/Documents/GitHub/atlasClustering/example/DLPFC_spe.RDS")
@@ -51,36 +46,29 @@ spe <- readRDS("/Users/calebhallinan/Desktop/jhu/rotations/hicks/atlasClustering
 
 
 ```{r Run atlasClustering}
-
-# Run function to make seurat list data
 seurat_ls <- spe2SeuList(spe,
                          sample_id = "sample_id",
                          sel_assay = "counts",
                          sel_col = c("layer_guess_reordered_short","spatialLIBD"),
                          col_name = c("layer","spatialLIBD"))
 
-# perform stage 1 of atlasclustering
 seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 6, nn_2=20, cl_resolution = 10,
                      top_pcs = 8, cl_min=5, find_HVG = T, hvg = 2000, cor_met = "PC",
                      edge_smoothing = T, use_glmpca = T, verbose = T)
 
-# perform state 2 of atlasclustering
 rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
                   rtn_seurat = T, nn_2 = 10, method = "MNN",
                   top_pcs = 8, use_glmpca = T, rare_ct = "m", resolution = 1)
 
-# assign labels from the two stages of atlasclustering
 seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
 ```
 
 
 ```{r Visulize Results}
-# Get color library
 layer_pal <- RColorBrewer::brewer.pal(7,"Set1")
-# Set later names
 names(layer_pal) <- c("L1", "L2", "L3", "L4", "L5", "L6", "WM")
+library(ggpubr)
 
-# Plot data next to eachother 
 ggarrange(plotlist = list("MNN1"= draw_slide_graph(seurat_ls[["151507"]]@meta.data,NULL,NULL,"sec_cluster_MNN"),
                           "GT1"=  draw_slide_graph(seurat_ls[["151507"]]@meta.data,NULL,NULL,"layer", layer_pal),
                           "MNN2"= draw_slide_graph(seurat_ls[["151669"]]@meta.data,NULL,NULL,"sec_cluster_MNN"),
@@ -89,13 +77,15 @@ ggarrange(plotlist = list("MNN1"= draw_slide_graph(seurat_ls[["151507"]]@meta.da
                           "GT3"=  draw_slide_graph(seurat_ls[["151673"]]@meta.data,NULL,NULL,"layer", layer_pal)),
           ncol = 2,nrow = 3)
 
-# Find adjusted rand index
 ari_vec <- sapply(seq_along(seurat_ls),function(i){
   mclust::adjustedRandIndex(seurat_ls[[i]]@meta.data[["layer"]],
                             seurat_ls[[i]]@meta.data[["sec_cluster_MNN"]])
+
 })
 
-# Print
 message(paste0("Sample\tARI:\n",paste(names(seurat_ls),'\t',format(ari_vec,digits = 3), collapse = "\n") ))
+
 mean(ari_vec)
 ```
+
+

@@ -1,0 +1,351 @@
+---
+title: "Fig2-MERFISH_benchmark"
+author: "Anonymous"
+date: "2024-05-10"
+output: html_document
+---
+
+DOI: https://doi.org/10.1016/j.cell.2022.12.010
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+library(spatialLIBD)
+library(Seurat)
+library(magrittr)
+library(tidyverse)
+library(peakRAM)
+library(BASS)
+library(BayesSpace)
+library(harmony)
+options(future.globals.maxSize = 8000 * 1024^2)
+```
+
+## Load Datasets
+
+```{r cars}
+save_dir <- "D:/Documents/GitHub/atlasClustering/archived/benchmark_res"
+source("~/GitHub/atlasClustering/example/analysis/benchmark_helper_func.R")
+seu_obj <- readRDS("G:/projects_bk/MERFISH/2330673b-b5dc-4690-bbbe-8f409362df31.rds")
+
+# Convert to Seurat List
+seurat_ls <- list()
+
+for(i in levels(seu_obj@meta.data[["donor_id"]])){
+  for(j in levels(seu_obj@meta.data[["slice"]])){
+    if(sum(seu_obj@meta.data[["slice"]] == j & seu_obj@meta.data[["donor_id"]] == i) > 0){
+      seurat_ls[[paste0(i,"_",j)]] <- subset(seu_obj, donor_id == i & slice == j)
+      seurat_ls[[paste0(i,"_",j)]]$coord_x <- as.numeric(as.character(seurat_ls[[paste0(i,"_",j)]]$center_x))
+      seurat_ls[[paste0(i,"_",j)]]$coord_y <- as.numeric(as.character(seurat_ls[[paste0(i,"_",j)]]$center_y))
+      seurat_ls[[paste0(i,"_",j)]]$row <- round(as.numeric(as.character(seurat_ls[[paste0(i,"_",j)]]$center_x)))
+      seurat_ls[[paste0(i,"_",j)]]$col <- round(as.numeric(as.character(seurat_ls[[paste0(i,"_",j)]]$center_y)))
+    }
+  }
+}
+
+```
+
+## Benchmark
+
+```{r }
+# Prepare
+bench_res <- data.frame(method = c("atlasClustering","PRECAST","Seurat","BASS"),
+                        tic = 0,
+                        toc = 0,
+                        time = 0,
+                        mem = -1,
+                        ari = -1,
+                        ari_vec = "-",
+                        nmi = -1,
+                        nmi_vec = "-")
+fig_ls <- list()
+
+for(i in names(seurat_ls)){
+  fig_ls[[paste0("GT_",i)]] <- draw_slide_bench(seurat_ls[[i]]$coord_x,
+                                                seurat_ls[[i]]$coord_y,
+                                                seurat_ls[[i]]$tissue,"Tissue",i,
+                                                pal = RColorBrewer::brewer.pal(8,"Set1"),
+                                                flip = T)
+}
+#saveRDS(fig_ls,"~/GitHub/atlasClustering/archived/MERFISH_groundtruth.rds")
+```
+
+
+
+### atlasClustering
+
+```{r }
+mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 12, cl_resolution = 10,
+                             top_pcs = 5, cl_min = 10, find_HVG = F, cor_met = "PC",
+                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 16)
+        
+        rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
+                          rtn_seurat = T, nn_2 = 20, method = "MNN", find_HVG = F,
+                          top_pcs = 10, use_glmpca = T, rare_ct = "none", resolution = 2)
+        
+        seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
+        toc <- Sys.time()
+      }
+)
+
+bench_res <- rkd_res(bench_res,tic,toc,list(Peak_RAM_Used_MiB = 10000),"atlasClustering",seurat_ls,"tissue","sec_cluster_MNN")
+
+for(i in names(seurat_ls)){
+  fig_ls[[paste0("AC_",i)]] <- draw_slide_bench(seurat_ls[[i]]$coord_x,
+                                                seurat_ls[[i]]$coord_y,
+                                                seurat_ls[[i]]$sec_cluster_MNN,"atlasClustering",i,flip = T)
+}
+slide_ls <- list()
+
+for(i in names(seurat_ls)){
+  i = names(seurat_ls)[1]
+  slide_ls[[paste0("AC_",i)]] <- draw_slide_graph(seurat_ls[[i]]@meta.data,
+                                                  seurat_ls[[i]]@misc[["edges"]],
+                                                  0.8, "tissue")
+}
+
+
+```
+
+
+### PRECAST
+```{r }
+library(PRECAST)
+gc()
+mem_usage <- peakRAM(
+ {
+   tic <- Sys.time()
+   seuInt <- suppressMessages(PRECAST_test(seurat_ls,k=8,gene_num = 160))
+   toc <- Sys.time()
+ }
+)
+
+layer_vec <- sapply(seq_along(seurat_ls),function(i){
+  tmp_df <- data.frame(barcode = row.names(seuInt@meta.data) %>% 
+                         str_sub(start = 1, end = 18) %>% .[seuInt@meta.data[["batch"]]==i])
+  tmp_df <- left_join(tmp_df,
+                      seurat_ls[[names(seurat_ls)[i]]]@meta.data[,c("barcode","layer")], 
+                      by="barcode")
+  tmp_df$layer
+  
+}) %>% unlist()
+layer_vec <- sapply(seq_along(seurat_ls),function(i){
+  tmp_df <- data.frame(barcode = row.names(seuInt@meta.data) %>% 
+                          .[seuInt@meta.data[["batch"]]==i])
+  tmp_df <- left_join(tmp_df,
+                      data.frame(barcode = colnames(seurat_ls[[names(seurat_ls)[i]]]),
+                                 tissue = seurat_ls[[names(seurat_ls)[i]]]@meta.data[,"tissue"]), 
+                      by="barcode")
+  tmp_df$tissue
+  
+}) %>% unlist()
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"PRECAST",
+                     label_vec = layer_vec, result_vec = seuInt@meta.data[["cluster"]], sample_vec = seuInt@meta.data[["batch"]])
+
+for(i in names(seurat_ls)){
+  idx = seuInt@meta.data[["batch"]] == which(names(seurat_ls)==i)
+  fig_ls[[paste0("PC_",i)]] <- draw_slide_bench(seuInt@reductions[["position"]]@cell.embeddings[idx,2],
+                                                seuInt@reductions[["position"]]@cell.embeddings[idx,1],
+                                                seuInt@meta.data[["cluster"]][idx],"PRECAST",i,flip = T)
+}
+
+rm(seuInt)
+gc()
+```
+
+### Seurat
+
+```{r}
+
+mem_usage <- peakRAM(
+  {
+     tic <- Sys.time()
+     seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+       x <- NormalizeData(x)
+       x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 160)
+       })
+     features <- SelectIntegrationFeatures(object.list = seurat_ls)
+     seurat_ls <- lapply(X = seurat_ls, FUN = function(x) {
+       x <- ScaleData(x, features = features, verbose = FALSE)
+       x <- RunPCA(x, features = features, verbose = FALSE)
+       })
+     anchors <- FindIntegrationAnchors(object.list = seurat_ls, anchor.features = features, reduction = "rpca", verbose = F)
+     seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+     DefaultAssay(seu_combined) <- "integrated"
+
+         # Run the standard workflow for visualization and clustering
+     seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+     seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+     #seu_combined <- RunUMAP(seu_combined, reduction = "pca", dims = 1:10)
+     seu_combined <- FindNeighbors(seu_combined, reduction = "pca", dims = 1:10)
+     seu_combined <- FindClusters(seu_combined, resolution = 0.1)
+     toc <- Sys.time()
+  }
+)
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"Seurat",
+                     label_vec = seu_combined@meta.data[["tissue"]], 
+                     result_vec = seu_combined@meta.data[["seurat_clusters"]],
+                     sample_vec = paste(sep="_",seu_combined@meta.data[["donor_id"]],seu_combined@meta.data[["slice"]]))
+
+for(i in names(seurat_ls)){
+  idx = paste0(seu_combined@meta.data[["donor_id"]],"_",seu_combined@meta.data[["slice"]]) == i
+  fig_ls[[paste0("SR_",i)]] <- draw_slide_bench(as.numeric(seu_combined@meta.data[["center_x"]][idx]),
+                                                as.numeric(seu_combined@meta.data[["center_y"]][idx]),
+                                                seu_combined@meta.data[["seurat_clusters"]][idx],"Seurat",i,flip = T)
+}
+
+
+
+```
+### BayesSpace
+
+```{r}
+#BayesSpace
+
+sce <- SingleCellExperiment(assays=list(counts=spe@assays@data@listData[["logcounts"]]),
+                            rowData=NULL,
+                            colData=spe@colData)
+
+sample_names <- levels(as.factor(sce$sample_id))
+
+sce$row <- sce$array_row
+sce$col <- sce$array_col
+
+
+for(j in seq_along(sample_names)){
+  sce$row[sce$sample_id == sample_names[j]] <- sce$row[sce$sample_id == sample_names[j]] + 100*((j-1)%%3)
+  sce$col[sce$sample_id == sample_names[j]] <- sce$col[sce$sample_id == sample_names[j]] + 150*floor((j-1)/3)
+}
+
+mem_usage <- peakRAM(
+  {
+    tic <- Sys.time()
+    sce <- spatialPreprocess(sce, platform="Visium", n.PCs = 50)
+    sce = RunHarmony(sce, "sample_id", verbose = F)
+    #sce <- qTune(sce, qs=seq(2, 10), platform="ST", d=7)
+    #qPlot(sce)
+    
+    sce <- spatialCluster(sce, use.dimred = "HARMONY", q = 7, nrep = 10000)
+    toc <- Sys.time()
+  }
+)
+
+
+bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"BayesSpace",
+                     label_vec  = sce@colData@listData[["spatialLIBD"]], 
+                     result_vec = sce@colData@listData[["spatial.cluster"]],
+                     sample_vec = sce@colData@listData[["sample_id"]])
+
+for(i in names(seurat_ls)){
+  idx = sce@colData@listData[["sample_id"]] == i
+  fig_ls[[paste0("BS_",i)]] <- draw_slide_bench(sce@colData@listData[["row"]][idx],
+                                                sce@colData@listData[["col"]][idx],
+                                                sce@colData@listData[["spatial.cluster"]][idx],"BayesSpace",i,flip = F)
+}
+
+
+
+
+
+```
+
+
+
+## Generate Figures
+```{r}
+bench_res <- bench_res[-4,]
+# ARI/NMI boxplot
+fig_ls[["ARI_stat"]] <- ggplot(data.frame(method = rep(bench_res$method, each=length(seurat_ls)),
+                                          ARI = sapply(bench_res$ari_vec,function(s)str_split(s,pattern = ",")) %>% 
+                                            unlist %>% as.numeric()),
+                               aes(x = method, y = ARI, fill = method)) + 
+  geom_boxplot() + 
+  theme_classic()
+
+fig_ls[["NMI_stat"]] <- ggplot(data.frame(method = rep(bench_res$method, each=length(seurat_ls)),
+                  NMI = sapply(bench_res$nmi_vec,function(s)str_split(s,pattern = ",")) %>% unlist %>% as.numeric()),
+       aes(x = method, y = NMI, fill = method)) + 
+  geom_boxplot() + 
+  theme_classic()
+
+# Time/Mem 
+fig_ls[["Mem_stat"]] <- ggplot(data.frame(method = bench_res$method,
+                  Mem = bench_res$mem),
+       aes(x = method, y = Mem, fill = method)) + 
+  geom_bar(stat = "identity",width = 0.5) + 
+  theme_classic()
+
+fig_ls[["Time_stat"]] <- ggplot(data.frame(method = bench_res$method,
+                  Time_min = (bench_res$toc-bench_res$tic)/60),
+       aes(x = method, y = Time_min, fill = method)) + 
+  geom_bar(stat = "identity",width = 0.5) + 
+  theme_classic()
+
+# Sample Plot
+pdf(paste0(Sys.Date(),"_MERFISH_Benchmark_results2.pdf"),width = 4*7,height = 4)
+sample_id = names(seurat_ls)[18]
+
+ggpubr::ggarrange(plotlist = list(fig_ls[[paste0("GT_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("AC_",sample_id)]] + NoLegend(),
+                                  fig_ls[[paste0("PC_",sample_id)]] + NoLegend(),
+                                  fig_ls[["ARI_stat"]],fig_ls[["NMI_stat"]],fig_ls[["Time_stat"]],fig_ls[["Mem_stat"]]),
+                  nrow = 1,ncol = 7)
+dev.off()
+
+# Export individual figure
+for(i in 1:nrow(bench_res)){
+  j = switch(bench_res$method[i],
+             atlasClustering = "AC",
+             PRECAST = "PC",
+             Seurat = "SR",
+             BayesSpace = "BS",
+             BASS = "BA")
+  # Running results
+  pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_",bench_res$method[i],"_res.pdf")),width = 8,height = 8)
+  
+  ggpubr::ggarrange(plotlist = lapply(names(seurat_ls),function(x){fig_ls[[paste0(j,"_",x)]] + NoLegend()}),
+                    nrow = 1,ncol = 1) %>% print()
+  dev.off()
+}
+
+# Ground Truth
+pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_ground_truth.pdf")),width = 8,height = 8)
+
+ggpubr::ggarrange(plotlist = lapply(names(seurat_ls),function(x){fig_ls[[paste0("GT_",x)]]}),
+                  nrow = 1,ncol = 1)
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_ARI_stat.pdf")),width = 6,height = 4)
+fig_ls[["ARI_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_NMI_stat.pdf")),width = 6,height = 4)
+fig_ls[["NMI_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_Time_stat.pdf")),width = 6,height = 4)
+fig_ls[["Time_stat"]] %>% print()
+dev.off()
+
+pdf(file.path(save_dir, paste0(Sys.Date(),"_MERFISH_Benchmark_Mem_stat.pdf")),width = 6,height = 4)
+fig_ls[["Mem_stat"]] %>% print()
+dev.off()
+
+saveRDS(fig_ls, file.path(save_dir, paste0(Sys.Date(),"_MERFISH_bench_fig.RDS")))
+write_tsv(bench_res,file.path(save_dir, paste0(Sys.Date(),"_MERFISH_bench_res.tsv")))
+
+```
+
+
+## Export seurat list
+
+```{r}
+saveRDS(seurat_ls,file.path(save_dir, paste0(Sys.Date(),"_MERFISH_seurat_list.RDS")))
+```
+
+

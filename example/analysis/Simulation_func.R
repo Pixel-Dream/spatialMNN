@@ -83,6 +83,30 @@ qurtcirc_group_fun <- function(x,y){
   )
 }
 
+# # * Chessboard Pattern -------------------------------------------------------
+chessboard_group_fun <- function(x,y){
+  dplyr::case_when(
+    x %% 0.25 < 0.125 & y %% 0.25 < 0.125 ~ "Group 1",
+    x %% 0.25 < 0.125 & y %% 0.25 >= 0.125 ~ "Group 2",
+    x %% 0.25 >= 0.125 & y %% 0.25 < 0.125 ~ "Group 3",
+    x %% 0.25 >= 0.125 & y %% 0.25 >= 0.125 ~ "Group 4",
+    TRUE ~ NA_character_
+  )
+}
+
+# # * Thin Layer Pattern -------------------------------------------------------
+thinlayer_group_fun <- function(x,y){
+  dplyr::case_when(
+    abs(x - y) < 0.05 ~ "Group 1",
+    abs(x + y - 1) < 0.075 ~ "Group 2",
+    x + y < 1 ~ "Group 3",
+    x <= 1 & y <= 1 ~ "Group 4",
+    TRUE ~ NA_character_
+  )
+}
+
+
+
 norm <- function(x){
   (x - min(x))/ (max(x) - min(x))
 }
@@ -96,40 +120,40 @@ assign_celltype <- function(probs, cell_max = 1){
 ##### Main Simulation #####
 spe_template <- STexampleData::Visium_humanDLPFC()
 
-my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_ratio = 1, top_pcs = 30, 
-                   n_group = 4, n_celltype = 4, map_mat = NULL, cell_max = 1, n_sample = 4, 
+my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_ratio = 1, top_pcs = 30,
+                   n_group = 4, n_celltype = 4, map_mat = NULL, cell_max = 1, n_sample = 4,
                    segmentation = T, integration = T){
   n_spots <- ncol(tmp_spe)
   stopifnot(ig_ratio<=1)
   stopifnot(ncol(map_mat)==n_celltype)
   seu_ls <- list()
   set.seed(it)
-  
+
   if(is.null(map_mat)){
     map_mat <- matrix(0,nrow = n_group, ncol = n_celltype, byrow = T)
     for(i in 1:n_group) map_mat[i,i] <- 1
   }
-  
+
   row.names(map_mat) <- paste("Group",1:n_group)
   colnames(map_mat) <- paste0("Celltype_",1:n_celltype)
-  
+
   total_gene_num <- round(n_gene*n_celltype/ig_ratio)
   # Ground truth ranking
   rowData_df <- data.frame(
-    gene_idx  = 1:total_gene_num, 
+    gene_idx  = 1:total_gene_num,
     mu_shift = runif(n = total_gene_num, min = 2, max = 4),# Different mean expression level
     var_scale = runif(n = total_gene_num, min = 1, max = 4) # Different effect size
-  ) |> 
+  ) |>
     mutate(gene_name = paste0("gene_", gene_idx),
            marker=ifelse(ceiling(gene_idx/n_gene) <= n_celltype,
                          paste0("Celltype_",ceiling(gene_idx/n_gene)),
-                         "noise")) |> 
+                         "noise")) |>
     column_to_rownames("gene_name")
-  
+
   if(n_sample!=4){
-    pattern_vec <- sample(c("lnr","circ","semicirc","qurtcirc"),n_sample,replace = T)
-  }else pattern_vec <- c("lnr","circ","semicirc","qurtcirc")
-  
+    pattern_vec <- sample(c("lnr","circ","thinlayer","chessboard"),n_sample,replace = T)
+  }else pattern_vec <- c("lnr","circ","thinlayer","chessboard")
+
   # Choose one of the spatial pattern
   for(i in seq_along(pattern_vec)) {
     pattern <- pattern_vec[i]
@@ -138,10 +162,12 @@ my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_r
                        "lnr"=lnr_group_fun,
                        "circ"=circ_group_fun,
                        "semicirc"=semicirc_group_fun,
-                       "qurtcirc"=qurtcirc_group_fun) 
+                       "qurtcirc"=qurtcirc_group_fun,
+                       "thinlayer"=thinlayer_group_fun,
+                       "chessboard"=chessboard_group_fun)
     set.seed(it)
-    spa_str_df <- spatialCoords(tmp_spe) |> 
-      data.frame() |> 
+    spa_str_df <- spatialCoords(tmp_spe) |>
+      data.frame() |>
       mutate(
         x = norm(pxl_col_in_fullres),
         y = norm(pxl_row_in_fullres),
@@ -158,28 +184,28 @@ my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_r
                           FUN = function(x){
                             str_split(x,pattern=',') %>% unlist() %>% length()
                           }),
-        
+
         #std_z = scale(z) # standardized
         coord_x = tmp_spe@colData@listData[["array_col"]],
         coord_y = tmp_spe@colData@listData[["array_row"]]
       )
     # Check cell type ratio
-    
+
     for(j in 1:n_celltype){
       spa_str_df[[paste0("Celltype_",j)]] <- sapply(spa_str_df$cell_type,
                                                     FUN = function(x){
                                                       str_count(x,pattern = paste0("Celltype_",j))
                                                     })
     }
-    
+
     #stopifnot(all(!is.na(spa_str_df$std_z)))
     # Check region
-    #ggplot(spa_str_df,aes(x=pxl_col_in_fullres,y=pxl_row_in_fullres, color=as.factor(z))) + 
-    #  geom_point() + 
+    #ggplot(spa_str_df,aes(x=pxl_col_in_fullres,y=pxl_row_in_fullres, color=as.factor(z))) +
+    #  geom_point() +
     #  theme_classic()
     # Simulated raw counts following Poisson noise
     # gene by spot
-    gene_count_mat <- 
+    gene_count_mat <-
       map2(.x = rowData_df$mu_shift,
            #.y = rowData_df$var_scale,
            .y = rowData_df$gene_idx,
@@ -193,7 +219,7 @@ my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_r
                  mean = eta_vec,
                  sd = noise
                )
-               
+
              }else{
                cell_type_vec <- str_split(spa_str_df$cell_type,pattern = ",") %>% unlist()
                eta_vec <- (cell_type_vec == markers)*shift
@@ -211,28 +237,29 @@ my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_r
                                    mean(tmp_vec[l_vec[x]:r_vec[x]])
                                  })
              }
-             
+
              stopifnot(length(ret_vec) == n_spots)
              return(data.frame(ret_vec) %>% `colnames<-`(paste0("gene_",gene_idx)))
-           }) |> 
-      list_cbind() |>  
+           }) |>
+      list_cbind() |>
       t()
-    
+
     # Cap
     gene_count_mat[gene_count_mat<0] <- 0
-    
+
     rownames(gene_count_mat) <- rownames(rowData_df)
     colnames(gene_count_mat) <- rownames(spa_str_df)
-    
+
     seu_obj <- CreateSeuratObject(counts = gene_count_mat,
                                   project = "tmp_seurat",
                                   meta.data = spa_str_df)
+    seu_obj <- NormalizeData(seu_obj, verbose = F)
     seu_obj <- ScaleData(seu_obj, features = row.names(seu_obj), do.scale = F, do.center = F)
     #DoHeatmap(seu_obj, features = row.names(seu_obj)[c(1:10,201:210,401:410,601:610,801:810)],group.by = "z") + NoLegend()
     seu_ls[[paste0(pattern,"_",i)]] <- seu_obj
   }
   # Create Seurat
-  #ggplot(seu_obj@meta.data,aes(x = as.factor(cell_num))) + 
+  #ggplot(seu_obj@meta.data,aes(x = as.factor(cell_num))) +
   #  geom_histogram(stat="count") +
   #  theme_classic()
   for(pattern in names(seu_ls)){
@@ -243,7 +270,7 @@ my_sim <- function(it = 1, tmp_spe=spe_template, n_gene = 200, noise = 0.2, ig_r
     seu_ls[[pattern]]@meta.data[["col"]] = seu_ls[[pattern]]@meta.data[["coord_y"]]
     seu_ls[[pattern]]@misc[["group"]] <- draw_slide_graph(seu_ls[[pattern]]@meta.data,col_sel = "z")
   }
-  
+
   if(segmentation) seu_ls <- stage_1(seu_ls,preprocess = F, top_pcs = top_pcs)
   if(segmentation & integration){
     rtn_ls <- stage_2(seu_ls,cl_key = "merged_cluster",rtn_seurat = T,nn_2 = 1,method = "MNN", top_pcs = top_pcs)

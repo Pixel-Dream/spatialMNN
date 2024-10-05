@@ -15,13 +15,16 @@ library(pryr)
 library(peakRAM)
 library(BayesSpace)
 library(mbkmeans)
+library(tidyverse)
+library(Seurat)
+library(PRECAST)
 ```
 
 ## Simulation Benchmark
 for Memory&Time Comparison
 
 ```{r }
-sample_num_seq <- c(2^c(1:4))
+sample_num_seq <- c(2^c(5:6))
 bench_tml <- data.frame(sample_num = sample_num_seq,
                         tic = 0,
                         toc = 0,
@@ -62,16 +65,26 @@ ggplot(data.frame(Region = rep(paste0("Region_",1:4),4),
 
 for(it in 1:5){
   message(paste("Iter:",it))
-  for(i in seq_along(sample_num_seq)){
+  #for(i in seq_along(sample_num_seq)){
+  i = 2
     message(paste("Sample Num:",sample_num_seq[i]))
     seu_ls <- my_sim(it=it, n_gene=200, noise = 0.2, ig_ratio=0.9, top_pcs = 4, map_mat = map_mat,
                      n_sample = sample_num_seq[i], cell_max = 7, segmentation = F)
     if(F){
       plot_ls <- list()
       for(sample_id in names(seu_ls)){
-       plot_ls[[sample_id]] <- ggplot() + geom_scatterpie(aes(x=coord_y, y=coord_x, group=layer, size = cell_num),
-                                      data=seu_ls[[sample_id]]@meta.data,
-                           cols=paste0("Celltype_",1:4)) + coord_equal()
+       # plot_ls[[sample_id]] <- ggplot() + geom_scatterpie(aes(x=coord_y, y=coord_x, 
+       #                                                        group=layer, 
+       #                                                        r = (0.75)),
+       #                                data=seu_ls[[sample_id]]@meta.data,
+       #                     cols=paste0("Celltype_",1:4), color = NA)  + 
+       #   theme_classic()
+       plot_ls[[sample_id]] <- ggplot(data=seu_ls[[sample_id]]@meta.data, aes(x=coord_y, y=coord_x, color = layer)) + 
+         geom_point() +
+         theme_classic()
+       pdf(file = paste0("Sim_pattern_",sample_id,".pdf"), width = 12, height = 12)
+       print(plot_ls[[sample_id]])
+       dev.off()
       }
       
     }
@@ -103,7 +116,7 @@ for(it in 1:5){
     mem_usage <- peakRAM(
       {
         tic <- Sys.time()
-        seuInt <- suppressMessages(PRECAST_test(seu_ls,k=4,gene_num = 800))
+        seuInt <- suppressMessages(PRECAST_test(seu_ls,k=5,gene_num = 800))
         toc <- Sys.time()
       }
     )
@@ -125,50 +138,69 @@ for(it in 1:5){
     rm(seuInt)
     gc()
     # Seurat
-    mem_usage <- peakRAM(
-      {
-        tic <- Sys.time()
-        seu_ls <- lapply(X = seu_ls, FUN = function(x) {
-          #x <- NormalizeData(x)
-          x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
-          })
-        features <- SelectIntegrationFeatures(object.list = seu_ls)
-        seu_ls <- lapply(X = seu_ls, FUN = function(x) {
-          x <- ScaleData(x, features = features, verbose = FALSE)
-          x <- RunPCA(x, features = features, verbose = FALSE)
-          })
-        anchors <- FindIntegrationAnchors(object.list = seu_ls, anchor.features = features, reduction = "rpca", verbose = F)
-        seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
-        DefaultAssay(seu_combined) <- "integrated"
+    # disable when sample_num > 16
+    if(length(seu_ls) <= 16){
+      mem_usage <- peakRAM(
+        {
+           tic <- Sys.time()
+           seu_ls <- lapply(X = seu_ls, FUN = function(x) {
+             #x <- NormalizeData(x)
+             x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 800)
+             })
+           features <- SelectIntegrationFeatures(object.list = seu_ls)
+           seu_ls <- lapply(X = seu_ls, FUN = function(x) {
+             x <- ScaleData(x, features = features, verbose = FALSE)
+             x <- RunPCA(x, features = features, verbose = FALSE)
+             })
+           anchors <- FindIntegrationAnchors(object.list = seu_ls, anchor.features = features, reduction = "rpca", verbose = F)
+           seu_combined <- IntegrateData(anchorset = anchors, verbose = F)
+           DefaultAssay(seu_combined) <- "integrated"
     
-        # Run the standard workflow for visualization and clustering
-        seu_combined <- ScaleData(seu_combined, verbose = FALSE)
-        seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
-        seu_combined <- RunUMAP(seu_combined, reduction = "pca", dims = 1:10)
-        seu_combined <- FindNeighbors(seu_combined, reduction = "pca", dims = 1:10)
-        seu_combined <- FindClusters(seu_combined, resolution = 0.1)
-        toc <- Sys.time()
-      }
-    )
-    bench_res[["Seurat"]]$tic[i] <- tic
-    bench_res[["Seurat"]]$toc[i] <- toc
-    bench_res[["Seurat"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
-    
-    ari_vec <- sapply(seq_along(seu_ls),function(i){
-      mclust::adjustedRandIndex(seu_combined@meta.data[["seurat_clusters"]][seu_combined$batch == names(seu_ls)[i]], 
-                                seu_combined@meta.data[["layer"]][seu_combined$batch == names(seu_ls)[i]])
+               # Run the standard workflow for visualization and clustering
+           seu_combined <- ScaleData(seu_combined, verbose = FALSE)
+           seu_combined <- RunPCA(seu_combined, npcs = 10, verbose = FALSE)
+           #seu_combined <- RunUMAP(seu_combined, reduction = "pca", dims = 1:10)
+           seu_combined <- FindNeighbors(seu_combined, reduction = "pca", dims = 1:10)
+           seu_combined <- FindClusters(seu_combined, resolution = 0.1)
+           toc <- Sys.time()
+        }
+      )
+      bench_res[["Seurat"]]$tic[i] <- tic
+      bench_res[["Seurat"]]$toc[i] <- toc
+      bench_res[["Seurat"]]$mem[i] <- mem_usage$Peak_RAM_Used_MiB
       
-    })
-    bench_res[["Seurat"]]$ari[i] <- ari_vec %>% mean()
-    bench_res[["Seurat"]]$ari_var[i] <- ari_vec %>% var()
+      ari_vec <- sapply(seq_along(seu_ls),function(i){
+        mclust::adjustedRandIndex(seu_combined@meta.data[["seurat_clusters"]][seu_combined$batch == names(seu_ls)[i]], 
+                                  seu_combined@meta.data[["layer"]][seu_combined$batch == names(seu_ls)[i]])
+        
+      })
+      bench_res[["Seurat"]]$ari[i] <- ari_vec %>% mean()
+      bench_res[["Seurat"]]$ari_var[i] <- ari_vec %>% var()
+      rm(seu_combined)
+      gc()
+    }
+    
     
     #BayesSpace
+    
+    seu_combined <- Reduce(
+      f = function(x, y) {merge(x, y, merge.data = FALSE)},
+      x = seu_ls)
+    
     sce <- SingleCellExperiment(assays=list(counts=seu_combined@assays[["RNA"]]@counts),
                                 rowData=NULL,
                                 colData=seu_combined@meta.data)
     sce@assays@data@listData[["logcounts"]] <- sce@assays@data@listData[["counts"]]
     rm(seu_combined)
     gc()
+    
+    sample_names <- levels(as.factor(sce@colData@listData[["batch"]]))
+
+    for(j in seq_along(sample_names)){
+      sce$row[sce$batch == sample_names[j]] <- sce$row[sce$batch == sample_names[j]] + 100*((j-1)%%3)
+      sce$col[sce$batch == sample_names[j]] <- sce$col[sce$batch == sample_names[j]] + 150*floor((j-1)/3)
+    }
+    
     mem_usage <- peakRAM(
       {
         tic <- Sys.time()
@@ -196,7 +228,7 @@ for(it in 1:5){
     })
     bench_res[["BayesSpace"]]$ari[i] <- ari_vec %>% mean()
     bench_res[["BayesSpace"]]$ari_var[i] <- ari_vec %>% var()
-  }
+  #}
   
   bench_res_ls[[paste0("it_",it)]] <- bench_res
   for(j in names(bench_res)){
@@ -286,8 +318,18 @@ pList <- SpaPlot(seuInt, item = "cluster", batch = NULL, point_size = 1, cols = 
     nrow.legend = 7)
 drawFigs(pList, layout.dim = c(2, 2), common.legend = TRUE, legend.position = "right", align = "hv")
 
-ggplot(seu_ls$lnr_4@meta.data,aes(x = row, y = col, color = z)) + 
-  geom_point()
+
+seuInt@meta.data[["row"]] = seuInt@reductions[["position"]]@cell.embeddings[,2]
+seuInt@meta.data[["col"]] = seuInt@reductions[["position"]]@cell.embeddings[,1]
+
+plot_ls <- lapply(levels(seuInt@meta.data[["batch"]]),
+                  function(x){
+                    ggplot(seuInt@meta.data %>% subset(batch == x),
+                           aes(x = row, y = col, color = cluster)) + 
+                      geom_point() + 
+                      theme_classic()
+                  })
+
 
 
 # Seurat Visualize
@@ -295,6 +337,7 @@ plot_ls <- list()
 for(i in levels(seu_combined$batch %>% as.factor())){
   plot_ls[[i]] <- ggplot(seu_combined@meta.data %>% subset(batch==i), aes(x = col, y = row, color = seurat_clusters)) + 
     geom_point() +
+    scale_color_manual(values = RColorBrewer::brewer.pal(10,"Paired")) + 
     labs(title = i) +
     theme_classic() #+ NoLegend()
 }

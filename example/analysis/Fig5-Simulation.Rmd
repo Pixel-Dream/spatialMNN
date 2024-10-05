@@ -1,0 +1,421 @@
+---
+title: "Fig5-Simulation"
+author: "Anonymous"
+date: "2024-05-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(atlasClustering)
+source("~/GitHub/atlasClustering/example/analysis/Simulation_func.R")
+source("~/GitHub/atlasClustering/example/analysis/benchmark_helper_func.R")
+library(spatialLIBD)
+library(Seurat)
+library(magrittr)
+library(tidyverse)
+library(peakRAM)
+library(PRECAST)
+library(BASS)
+library(BayesSpace)
+library(harmony)
+options(future.globals.maxSize = 4000 * 1024^2)
+```
+
+## Generate Simulated Datasets
+
+```{r}
+sample_num_seq <- c(2^c(1:6))
+bench_tml <- data.frame(method = c("spatialMNN","PRECAST","Seurat","BASS","BayesSpace","spatialMNN_par"),
+                        tic = 0,
+                        toc = 0,
+                        time = 0,
+                        mem = -1,
+                        ari = -1,
+                        ari_vec = "-",
+                        nmi = -1,
+                        nmi_vec = "-")
+
+bench_res_ls <- list()
+
+num_it = 5
+## PRESET DATAFRAME FOR BENCHMARK RESULTS
+for(it in 1:num_it){
+  for(i in sample_num_seq){
+    bench_res_ls[[paste0("it_",it,"_n_",i)]] <- bench_tml
+  }
+}
+
+
+# map_mat <- matrix(c(0.9,0.03,0.04,0.03,
+#                     0.2,0.6,0.05,0.15,
+#                     0.25,0.15,0.5,0.1,
+#                     0.1,0.1,0.1,0.7),nrow = 4, byrow = T)
+# 
+# map_mat <- matrix(c(1,0,0,0,
+#                     0,1,0,0,
+#                     0,0,1,0,
+#                     0,0,0,1),nrow = 4, byrow = T)
+# 
+map_mat <- matrix(c(0.9,0.1,0,0,
+                    0,0.9,0.05,0.05,
+                    0,0.05,0.95,0,
+                    0.1,0,0.1,0.8),nrow = 4, byrow = T)
+
+ggplot(data.frame(Region = rep(paste0("Region_",1:4),4),
+                  CellType = rep(paste0("CellType_",1:4),each = 4),
+                  Ratio = as.numeric(map_mat)*100),
+       aes(x = Region, fill = CellType, y = Ratio)) + 
+  geom_bar(stat = "identity") + 
+  theme_classic()+ 
+     scale_color_manual(values = RColorBrewer::brewer.pal(4,"Set2"))
+
+
+plot_sim_pattern <- function(seu_ls, sel_col="layer"){
+  plot_ls <- list()
+  for(sample_id in names(seu_ls)){
+   plot_ls[[sample_id]] <- ggplot(data=seu_ls[[sample_id]]@meta.data, 
+                                  aes(x=.data[["coord_y"]], y=.data[["coord_x"]], color = .data[[sel_col]])) + 
+     geom_point() +
+     theme_classic() 
+  }
+  plot_ls
+}
+
+
+
+```
+
+
+## Simulation Benchmark
+for Memory&Time Comparison
+
+```{r} 
+## SET BENCHMARK FLAG
+run_spatialMNN = T
+run_spatialMNN_par = T
+run_Seurat = F
+run_BayesSpace = T
+run_BASS = T
+run_PRECAST = T
+
+
+
+for(it in 1:5){
+  message(paste("Iter:",it))
+  for(i in c(5)){
+    bench_res <- bench_res_ls[[paste0("it_",it,"_n_",sample_num_seq[i])]]
+    message(paste("Sample Num:",sample_num_seq[i]))
+    # Generate Datasets
+    seu_ls <- my_sim(it=it, n_gene=200, noise = 0.2, ig_ratio=0.9, top_pcs = 4, map_mat = map_mat,
+                     n_sample = sample_num_seq[i], cell_max = 7, segmentation = F)
+    if(F){# Save figures
+      plot_ls<- plot_sim_pattern(seu_ls)
+      #ggpubr::ggarrange(plotlist = plot_ls,ncol = 4,nrow=1)
+      plot_ls <- list()
+      for(sample_id in names(seu_ls)[1:4]){
+          # plot_ls[[sample_id]] <- ggplot() + geom_scatterpie(aes(x=coord_y, y=coord_x, 
+          #                                                        group=layer, 
+          #                                                        r = (0.75)),
+          #                                data=seu_ls[[sample_id]]@meta.data,
+          #                     cols=paste0("Celltype_",1:4), color = NA)  + 
+          #   theme_classic()
+          plot_ls[[sample_id]] <- ggplot(data=seu_ls[[sample_id]]@meta.data, aes(x=coord_y, y=coord_x, color = layer)) + 
+              geom_point() +
+              theme_classic()
+          pdf(file = paste0("Sim_pattern_",sample_id,".pdf"), width = 6, height = 5)
+          print(plot_ls[[sample_id]])
+          dev.off()
+      }
+    }
+    if(run_spatialMNN){
+      mem_usage <- peakRAM(
+        {
+          tic <- Sys.time()
+          seu_ls  <- stage_1(seu_ls ,find_HVG = F, top_pcs = 4, 
+                             cor_threshold = 0.6, edge_smoothing = T, nn = 6, 
+                             use_glmpca = T, verbose = T, num_core = 1)
+          
+          rtn_ls <- stage_2(seu_ls , cl_key = "merged_cluster",rtn_seurat = T,
+                            nn_2 = 2,method = "MNN",top_pcs = 4, use_glmpca = T, 
+                            rare_ct = "m", resolution = 1)
+          seu_ls  <- assign_label(seu_ls , rtn_ls$cl_df, "MNN", 
+                                  cl_key = "merged_cluster",cor_threshold = 0.6)
+          toc <- Sys.time()
+        }
+      )
+      bench_res <- rkd_res(bench_res, tic, toc, mem_usage, "spatialMNN", seu_ls, "layer","sec_cluster_MNN")
+      rm(rtn_ls)
+    }
+    if(run_spatialMNN_par){
+      mem_usage <- peakRAM(
+        {
+          tic <- Sys.time()
+          seu_ls  <- stage_1(seu_ls ,find_HVG = F, top_pcs = 4, 
+                             cor_threshold = 0.6, edge_smoothing = T, nn = 6, 
+                             use_glmpca = T, verbose = T, num_core = 8)
+          
+          rtn_ls <- stage_2(seu_ls , cl_key = "merged_cluster",rtn_seurat = T,
+                            nn_2 = 2,method = "MNN",top_pcs = 4, use_glmpca = T, 
+                            rare_ct = "m", resolution = 1)
+          seu_ls  <- assign_label(seu_ls , rtn_ls$cl_df, "MNN", 
+                                  cl_key = "merged_cluster",cor_threshold = 0.6)
+          toc <- Sys.time()
+        }
+      )
+      bench_res <- rkd_res(bench_res, tic, toc, mem_usage, "spatialMNN_par", seu_ls, "layer","sec_cluster_MNN")
+      rm(rtn_ls)
+    }
+    # Seurat
+    if(run_Seurat){
+      mem_usage <- peakRAM(
+        {
+          tic <- Sys.time()
+          seu_combined <- Reduce(
+            f = function(x, y) {merge(x, y, merge.data = T)},
+            x = seu_ls)
+          
+          
+          seu_combined <- NormalizeData(seu_combined,verbose = F)
+          seu_combined <- FindVariableFeatures(seu_combined,verbose = F)
+          seu_combined <- ScaleData(seu_combined,verbose = F)
+          seu_combined <- RunPCA(seu_combined,verbose = F)
+          
+          seu_combined <- IntegrateLayers(
+            object = seu_combined, method = CCAIntegration,
+            orig.reduction = "pca", new.reduction = "integrated.cca",verbose = FALSE)
+          
+          seu_combined <- FindNeighbors(seu_combined, reduction = "integrated.cca", dims = 1:30)
+          seu_combined <- FindClusters(seu_combined, resolution = 0.1, cluster.name = "cca_cl")
+        
+          toc <- Sys.time()
+          
+        }
+      )
+      bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"Seurat",label_vec = seu_combined@meta.data[["layer"]], 
+                           result_vec = seu_combined@meta.data[["cca_cl"]],
+                           sample_vec = seu_combined@meta.data[["batch"]])
+      rm(seu_combined)
+    }
+    #BayesSpace
+    if(run_BayesSpace){
+      sce <- SingleCellExperiment(assays=list(counts = lapply(names(seu_ls),
+                                                            FUN = function(x)seu_ls[[x]]@assays[["RNA"]]@layers[["counts"]]) %>%
+                                              do.call(cbind,.) %>% `row.names<-`(row.names(seu_ls[[1]]))),
+                                rowData=NULL,
+                                colData=lapply(names(seu_ls), FUN = function(x)seu_ls[[x]]@meta.data) %>%do.call(rbind,.) )
+      sce@assays@data@listData[["logcounts"]] <- sce@assays@data@listData[["counts"]]
+      
+      gc()
+      
+      sample_names <- levels(as.factor(sce@colData@listData[["batch"]]))
+      
+      for(j in seq_along(sample_names)){
+        sce$row[sce$batch == sample_names[j]] <- sce$row[sce$batch == sample_names[j]] + 100*((j-1)%%3)
+        sce$col[sce$batch == sample_names[j]] <- sce$col[sce$batch == sample_names[j]] + 150*floor((j-1)/3)
+      }
+      
+      mem_usage <- peakRAM(
+        {
+          tic <- Sys.time()
+          sce <- spatialPreprocess(sce, platform="Visium",
+                                   n.PCs=7, n.HVGs=800, log.normalize=T)
+          #sce <- qTune(sce, qs=seq(2, 10), platform="ST", d=7)
+          #qPlot(sce)
+          
+          sce <- spatialCluster(sce, q=4, platform="Visium", d=7,
+                                init.method="mclust", model="t", gamma=2,
+                                nrep=1000, burn.in=100,
+                                save.chain=TRUE)
+          toc <- Sys.time()
+        }
+      ) 
+      
+      bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"BayesSpace",
+                           label_vec  = sce@colData@listData[["layer"]], 
+                           result_vec = sce@colData@listData[["spatial.cluster"]],
+                           sample_vec = sce@colData@listData[["batch"]])
+    }
+    # BASS
+    if(run_BASS){
+          mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        set.seed(0)
+        # Set up BASS object
+        BASS <- createBASSObject(lapply(seu_ls, 
+                                        function(seu_obj){
+                                          seu_obj@assays[["RNA"]]@layers[["counts"]] %>% 
+                                            `colnames<-`(colnames(seu_obj)) %>% `row.names<-`(row.names(seu_obj))
+                                        }), 
+                                 lapply(seu_ls, 
+                                        function(seu_obj){
+                                          data.frame(x=seu_obj$coord_x, y=seu_obj$coord_y,
+                                                     row.names=colnames(seu_obj))
+                                        }), 
+                                 C = 4, R = 4,
+                                 beta_method = "SW", init_method = "mclust")
+        
+        BASS <- BASS.preprocess(BASS, doLogNormalize = TRUE,
+                                geneSelect = "sparkx", nSE = 800, doPCA = TRUE, 
+                                scaleFeature = FALSE, nPC = 10)
+        
+        # Run BASS algorithm
+        BASS <- BASS.run(BASS)
+        BASS <- BASS.postprocess(BASS)
+        
+        toc <- Sys.time()
+      }
+    )
+    
+    bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"BASS",
+                         label_vec  = sce@colData@listData[["layer"]], 
+                         result_vec = unlist(BASS@results$z),
+                         sample_vec = sce@colData@listData[["batch"]])
+    }
+    # PRECAST
+    if(run_PRECAST){
+          gc()
+    mem_usage <- peakRAM(
+      {
+        tic <- Sys.time()
+        seuInt <- suppressMessages(PRECAST_test(seu_ls,k=5,gene_num = 800,sel_gene_method = "SPARK-X"))
+        toc <- Sys.time()
+      }
+    )
+    gc()
+    layer_vec <- sapply(seq_along(seu_ls),function(i){
+      tmp_df <- data.frame(barcode = row.names(seuInt@meta.data) %>% 
+                             str_sub(start = 1, end = 18) %>% .[seuInt@meta.data[["batch"]]==i])
+      tmp_df <- left_join(tmp_df,
+                          seu_ls[[names(seu_ls)[i]]]@meta.data[,c("barcode","layer")], 
+                          by="barcode")
+      tmp_df$layer
+    }) %>% unlist()
+    
+    bench_res <- rkd_res(bench_res,tic,toc,mem_usage,"PRECAST",
+                         label_vec = layer_vec, 
+                         result_vec = seuInt@meta.data[["cluster"]], 
+                         sample_vec = seuInt@meta.data[["batch"]])
+    
+    
+    
+    }
+    bench_res_ls[[paste0("it_",it,"_n_",sample_num_seq[i])]] <- bench_res
+  }
+}
+
+```
+
+
+## Export figure
+
+```{r}
+
+
+plot_ls <-list()
+
+# Optional load .csv results
+for(it in 1:5){
+  for(i in c(1:5)){
+    if(it == 1 & i == 1){
+      bench_res_df <- rbind(read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-31_",it,"_2_bench_res.csv")))[-3,],
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-06-06_",it,"_2_bench_res.csv")))[3,]) %>% 
+        add_column(it = it, sample_num = sample_num_seq[i])
+    }else if(i %in% c(1:4)){
+      bench_res_df <- rbind(read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-31_",it,"_",sample_num_seq[i],"_bench_res.csv")))[-3,],
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-06-06_",it,"_",sample_num_seq[i],"_bench_res.csv")))[3,]) %>% 
+        add_column(it = it, sample_num = sample_num_seq[i]) %>% rbind(bench_res_df,.)
+    }else if(i == 5){
+      bench_res_df <- rbind(bench_res_df,
+                            read.csv(file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/jhpce_res/",
+                                                      paste0("2024-05-30_",it,"_32_bench_res.csv")))[-3,] %>% 
+                              add_column(it = it, sample_num = sample_num_seq[i]))
+    }
+    
+  }
+}
+
+
+# From notebook
+for(it in 1:5){
+  for(i in c(1:5)){
+    if(it == 1 & i == 1){
+      bench_res_df <- data.frame(it=1,n=2^i,bench_res_ls[[paste0("it_",it,"_n_",2^i)]])
+    }else{
+      bench_res_df <- rbind(bench_res_df,data.frame(it=1,n=2^i,bench_res_ls[[paste0("it_",it,"_n_",2^i)]]))
+    }
+    
+  }
+}
+
+
+#filter
+bench_res_df <- bench_res_df[bench_res_df$ari!=-1,]
+
+bench_res_df <- bench_res_df %>%
+  mutate(Memory = as.numeric(mem)/1024,
+         TimeElapsed =  (as.numeric(toc)-as.numeric(tic))/60)
+  
+
+method_pal <- RColorBrewer::brewer.pal(8,"Set1")[-c(6:7)] %>% `names<-`(c("spatialMNN","PRECAST","Seurat","BASS","BayesSpace","spatialMNN_par"))
+
+lineplot_bench_res <- function(sample_num_vec, 
+                               metrics_vec, 
+                               method_vec, 
+                               pal_=NULL, x_title="Sample Num", y_title = ""){
+  
+  g <- ggplot(data.frame(x = sample_num_vec, y = metrics_vec, method = method_vec) %>% 
+                group_by(method,x) %>% summarise(mean_met = mean(y), sd = sd(y)), 
+       aes(x = as.factor(x), y = mean_met, color = method, group = method)) + 
+  geom_line() +
+  geom_point()+
+  xlab(x_title) +  ylab(y_title) + 
+  geom_errorbar(aes(ymin=mean_met-sd, ymax=mean_met+sd), 
+                width=.5,position=position_dodge(0.05)) +
+  theme_classic()
+  
+  if(!is.null(pal_)) g <- g + scale_color_manual(values = pal_)
+  
+  g
+  
+}
+
+
+plot_ls[["ARI"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$ari, 
+                                       bench_res_df$method,method_pal,y_title = "ARI")
+
+plot_ls[["NMI"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$nmi, 
+                                       bench_res_df$method,method_pal,y_title = "NMI")
+
+plot_ls[["Time"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$TimeElapsed, 
+                                       bench_res_df$method,method_pal,y_title = "Mean Time (min)")
+
+
+plot_ls[["Mem"]] <- lineplot_bench_res(bench_res_df$sample_num, 
+                                       bench_res_df$Memory, 
+                                       bench_res_df$method,method_pal,y_title = "Mean Memory (GB)")
+
+
+
+library(ggpubr)
+ggarrange(plotlist = plot_ls,nrow = 1,ncol = 4)
+
+
+
+
+
+```
+
+
+
+
+
+
