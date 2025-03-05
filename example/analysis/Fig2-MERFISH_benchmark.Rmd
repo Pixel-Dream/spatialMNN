@@ -78,18 +78,30 @@ for(i in names(seurat_ls)){
 mem_usage <- peakRAM(
       {
         tic <- Sys.time()
-        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.6, nn = 12, cl_resolution = 10,
-                             top_pcs = 5, cl_min = 10, find_HVG = F, cor_met = "PC",
-                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 16)
+        seurat_ls <- stage_1(seurat_ls, cor_threshold = 0.8, nn = 8, nn_2=20, cl_resolution = 10,
+                             top_pcs = 10, cl_min=5, find_HVG = F, cor_met = "PC",
+                             edge_smoothing = T, use_glmpca = T, verbose = T, num_core = 1)
         
         rtn_ls <- stage_2(seurat_ls, cl_key = "merged_cluster",
-                          rtn_seurat = T, nn_2 = 20, method = "MNN", find_HVG = F,
-                          top_pcs = 10, use_glmpca = T, rare_ct = "none", resolution = 2)
+                          rtn_seurat = T, nn_2 = 10, method = "MNN",
+                          top_pcs = 10, use_glmpca = T, rare_ct = "m", resolution = 1)
         
         seurat_ls <- assign_label(seurat_ls, rtn_ls$cl_df, "MNN", 0.6, cl_key = "merged_cluster")
         toc <- Sys.time()
       }
 )
+
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_fig2_MERFISH_edge_weight_stat.pdf")), width = 4, height = 3)
+
+ggplot(data.frame(sample = sapply(names(seurat_ls),\(x){rep(x,nrow(seurat_ls[[x]]@misc[["edges"]]))}) %>% unlist(),
+                  weight = sapply(seurat_ls,\(obj){obj@misc[["edges"]]$weight}) %>% unlist()),
+       aes(fill = sample, x = weight)) + 
+    geom_density(alpha = 0.2) +
+    geom_vline(aes(xintercept = 0.8), color = "red", linewidth = 1) + 
+    annotate("text", label = "Cor. Threshold = 0.8", x = 0.4, y = 2.4, size = 5, colour = "black")+
+    theme_classic() + NoLegend()
+
+dev.off()
 
 bench_res <- rkd_res(bench_res,tic,toc,list(Peak_RAM_Used_MiB = 10000),"atlasClustering",seurat_ls,"tissue","sec_cluster_MNN")
 

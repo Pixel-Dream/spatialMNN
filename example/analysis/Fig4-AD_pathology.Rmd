@@ -83,6 +83,19 @@ rtn_ls <- stage_2(seu_ls, cl_key = "merged_cluster",
 # assign labels from the two stages of atlasclustering
 seu_ls <- assign_label(seu_ls, rtn_ls$cl_df, "MNN", 0.8, cl_key = "merged_cluster")
 
+
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_AD_edge_weight_stat.pdf")), width = 4, height = 3)
+
+ggplot(data.frame(sample = sapply(names(seu_ls),\(x){rep(x,nrow(seu_ls[[x]]@misc[["edges"]]))}) %>% unlist(),
+                  weight = sapply(seu_ls,\(obj){obj@misc[["edges"]]$weight}) %>% unlist()),
+       aes(fill = sample, x = weight)) + 
+    geom_density(alpha = 0.2) +
+    geom_vline(aes(xintercept = 0.8), color = "red", linewidth = 1) + 
+    annotate("text", label = "Cor. Threshold = 0.8", x = 0.4, y = 2.4, size = 5, colour = "black")+
+    theme_classic() + NoLegend()
+
+dev.off()
+
 # Save results
 #saveRDS(seu_ls,"STARmap_cl.RDS")
 #saveRDS(rtn_ls,"STARmap_stage2_res.RDS")
@@ -198,10 +211,10 @@ plot_ls <- list()
 for(i in levels(as.factor(rtn_ls[["seurat_obj"]]$sec_cluster_MNN))){
   plot_ls[[paste0("cl_",i)]] <- ggplot(all_markers %>% subset(cluster == i & pct.1 > 0.1 & pct.2 > 0.1) %>% 
                                          mutate(de = ifelse(p_val_adj < 0.01 & abs(avg_log2FC) > .1,ifelse(avg_log2FC > 0,"UP","DOWN"),"NO")),
-       aes(x = avg_log2FC, y = -log10(p_val_adj), color = de)) +
+       aes(x = avg_log2FC, y = -log10(p_val), color = de)) +
     geom_point() +
     labs(title = paste("Cluster",i)) +
-    xlim(max(abs(all_markers$avg_log2FC))) + 
+    #xlim(max(abs(all_markers$avg_log2FC))) + 
     scale_color_manual(values = c("UP" = "green", "DOWN" = "red","NO" = "grey")) +
     theme_classic()
 }
@@ -219,14 +232,14 @@ library(ggVennDiagram)
 ggVennDiagram(list(PIG = PIG_13mo$gene, cl_9 = cl9_marker$gene))
 
 
-ggplot(all_markers %>% subset(cluster == i & pct.1 > 0.1 & pct.2 > 0.1) %>% 
+ggplot(all_markers %>% subset(cluster == 6 & pct.1 > 0.1 & pct.2 > 0.1) %>% 
                                          mutate(de = ifelse(p_val_adj < 0.01 & abs(avg_log2FC) > .1,ifelse(avg_log2FC > 0,"UP","DOWN"),"NO"),
                                                 de_label = ifelse(gene %in% PIG_13mo$gene & de == "UP", gene, NA)),
-       aes(x = avg_log2FC, y = -log10(p_val_adj), color = de, label = de_label)) +
+       aes(x = avg_log2FC, y = -log10(p_val), color = de, label = de_label)) +
     geom_point() +
     ggrepel::geom_text_repel() +
     labs(title = paste("Cluster",i)) +
-    xlim(-3,3) + 
+    #xlim(-3,3) + 
     scale_color_manual(values = c("UP" = "red", "DOWN" = "blue","NO" = "grey")) +
     theme_classic()
 

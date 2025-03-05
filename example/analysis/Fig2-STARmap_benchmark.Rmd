@@ -124,6 +124,18 @@ for(i in names(seurat_ls)){
 #draw_slide_graph(seurat_ls[[i]]@meta.data,
 #                 seurat_ls[[i]]@misc[["edges"]],NULL,"z")
 
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_edge_weight_stat.pdf")), width = 4, height = 3)
+
+ggplot(data.frame(sample = sapply(names(seurat_ls),\(x){rep(x,nrow(seurat_ls[[x]]@misc[["edges"]]))}) %>% unlist(),
+                  weight = sapply(seurat_ls,\(obj){obj@misc[["edges"]]$weight}) %>% unlist()),
+       aes(fill = sample, x = weight)) + 
+    geom_density(alpha = 0.5) +
+    geom_vline(aes(xintercept = 0.7), color = "red", linewidth = 1) + 
+    annotate("text", label = "Cor. Threshold = 0.7", x = 0.4, y = 1.6, size = 5, colour = "black")+
+    theme_classic() + NoLegend()
+
+dev.off()
+
 ```
 
 

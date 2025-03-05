@@ -58,19 +58,52 @@ barplotWrapper <- function(df, method_, metric_, col_pal = NULL, title_ = "", y_
   g
 }
 
+lineplotWrapper <- function(df, method_, metric_, sample_num_, col_pal = NULL, title_ = "", y_title_ = "value"){
+  require(dplyr)
+  require(ggplot2)
+  df <- data.frame(method = df[[method_]], sample_num = df[[sample_num_]], value = df[[metric_]])
+  
+  # Summarize the data to get mean and standard error for each method
+  df_summary <- df %>%
+    group_by(method, sample_num) %>%
+    summarize(
+      mean_value = mean(value),
+      se = sd(value) / sqrt(n()),
+      .groups = 'drop'
+    ) 
+  
+  # Create the plot
+  g <- ggplot(df_summary, aes(x = sample_num, y = mean_value, color = method)) +
+    geom_line(linewidth = 1.2) +
+    geom_jitter(data = df, aes(x = sample_num, y = value, color = method), 
+                width = 0.1, size = 2, alpha = 0.3) +
+    geom_errorbar(aes(ymin = mean_value - se, ymax = mean_value + se), width = 0.2) +
+    ylim(0, NA) + 
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 30, hjust = 0.5, vjust = 0.7)) +
+    labs(title = paste("Barplot of", title_),
+         x = "Method",
+         y = y_title_)
+  if(!is.null(col_pal)){
+    g <- g + scale_color_manual(values = col_pal) 
+      #scale_color_manual(values = col_pal)
+  }
+  
+  g
+}
+
 resReDraw <- function(df_, col_name, pal = NULL, flip = F, title_ = NULL){
   if(is.null(title_)) title_ = col_name
   g <- ggplot()
   g <- g + geom_point(mapping = aes(x = df_[["x"]], y = df_[["y"]], color=df_[[col_name]]),
                       data = df_) +
-    labs(x="x",y="y",title = col_name)
-  if(is.numeric(df_[[col_name]])){
-    require(viridis)
-    g <- g + scale_colour_gradientn(colours = viridis::viridis(n=10))
-  }else{
-    if(is.null(pal)) g <- g + scale_color_discrete()
-    else g <- g + scale_colour_manual(values = pal)
-  }
+    labs(x="x",y="y",title = title_)
+  
+  df_[[col_name]] <- as.character(df_[[col_name]])
+  
+  if(is.null(pal)) g <- g + scale_color_discrete()
+  else g <- g + scale_colour_manual(values = pal)
+
   g <- g + theme_void() + NoLegend()
   if(flip) g + coord_flip()
   else g
@@ -107,7 +140,7 @@ res_df_sub <- res_df %>%
 
 res_df_sub$mem_gb <- res_df_sub$mem/1024
 
-res_df_sub$time_sec <- (res_df_sub$toc-res_df_sub$tic)/60
+res_df_sub$time_min <- (res_df_sub$toc-res_df_sub$tic)/60
 
 res_df_sub <- subset(res_df_sub, method != "spatialMNN")
 
@@ -119,9 +152,9 @@ fig_ls[["NMI_stat"]] <- barplotWrapper(res_df_sub,"method","nmi", method_pal, "N
  
 fig_ls[["Mem_stat"]] <- barplotWrapper(res_df_sub,"method","mem_gb", method_pal, "Memory Spatial LIBD", "Memory(GB)") + NoLegend()
 
-fig_ls[["Time_stat"]] <- barplotWrapper(res_df_sub,"method","time_sec", method_pal, "Time Spatial LIBD", "Time") + NoLegend()
+fig_ls[["Time_stat"]] <- barplotWrapper(res_df_sub,"method","time_min", method_pal, "Time Spatial LIBD", "Time") + NoLegend()
 
-fig_ls[["Time_stat2"]] <- barplotWrapper(res_df_sub,"method","time_sec", method_pal, "Time Spatial LIBD", "Time") + ylim(0, 25) + NoLegend()
+fig_ls[["Time_stat2"]] <- barplotWrapper(res_df_sub,"method","time_min", method_pal, "Time Spatial LIBD", "Time") + ylim(0, 25) + NoLegend()
 
 require(ggpubr)
 pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_LIBD_bench_summary.pdf")), width = 8, height = 4)
@@ -133,32 +166,82 @@ dev.off()
 ### Export all figures
 
 ```{r}
-abbr_vec <- c("BA","BA","BS","ME","PC","SL","SR","SP") %>% 
-  `names<-`(c('BANKSY','BASS','BayesSpace','MENDER','PRECAST','SLAT','Seurat','spatialMNN_par'))
-pal_set <- RColorBrewer::brewer.pal(9, "Set1")
+abbr_vec <- c("BA","BA","BS","ME","PC","SL","SR","SP","SM") %>% 
+  `names<-`(c('BANKSY','BASS','BayesSpace','MENDER','PRECAST','SLAT','Seurat','spatialMNN_par','spatialMNN'))
+pal_set <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33",
+             "#A65628", "#F781BF", "#7570B3", "#E7298A", "#E6AB02", "#66C2A5", "#999999")
+
+
 slide_ls <- list()
 run_id = 2
 sel_sample = 11
+
+
 # load ground truth
 tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/LIBD_groundtruth.rds")
-slide_ls[["GT"]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = "Ground Truth"), 
+slide_ls[["GT"]] <- rasterize(resReDraw(df_ = tmp_ls[[sel_sample]][["plot_env"]][["df_"]], 
+                                        "Layer", pal_set, T, "Ground Truth"), 
                               layers='Point', dpi=150)
+
+sel_sample_id = str_sub(names(tmp_ls)[3],4)
+
 # load results
 for(i in which(res_df_sub$run == run_id)){
-  if(res_df_sub$method[i] != "BANKSY"){
-    tmp_ls <- readRDS(file.path(work_dir,"fig2_LIBD","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
-    slide_ls[[res_df_sub$method[i]]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = res_df_sub$method[i]), 
-                                                  layers='Point', dpi=150)
-    if(res_df_sub$method[i] %in% c("BASS","BayesSpace")){
-      slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]][[res_df_sub$method[i]]] <-
-        as.character(slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]][[res_df_sub$method[i]]])
-    } 
-  }
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_LIBD","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  
+  slide_ls[[res_df_sub$method[i]]] <- rasterize(resReDraw(df_ = tmp_ls[[sel_sample]][["plot_env"]][["df_"]], 
+                                                          colnames(tmp_ls[[sel_sample]][["plot_env"]][["df_"]])[3], 
+                                                          pal_set, ifelse(res_df_sub$method[i] %in% c("PRECAST","Seurat","spatialMNN_par"),T,F), 
+                                                          res_df_sub$method[i]), 
+                                                layers='Point', dpi=150)
+  
 }
 
-pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_LIBD_bench_res.pdf")), width = 12, height = 6)
-ggarrange(plotlist = slide_ls, ncol = 4, nrow = 2) %>% print()
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_LIBD_bench_res.pdf")), width = 20, height = 8)
+ggarrange(plotlist = slide_ls, ncol = 5, nrow = 2) %>% print()
 dev.off()
+
+
+```
+
+```{r}
+slide_ls <- list()
+run_id = 2
+
+# load ground truth
+tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/LIBD_groundtruth.rds")
+name_vec <- str_remove_all(names(tmp_ls),"GT_")
+
+slide_ls <- c(slide_ls, 
+                       lapply(name_vec,
+                              \(x){
+                                rasterize(resReDraw(df_ = tmp_ls[[paste0("GT_",x)]][["plot_env"]][["df_"]], 
+                                                    "Layer", pal_set, T, x), 
+                                        layers='Point', dpi=150)
+                              }))
+
+# load results
+for(i in which(res_df_sub$run == run_id)){
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_LIBD","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  
+  slide_ls <- c(slide_ls, 
+                         lapply(name_vec,
+                                \(x){
+                                  idx <- which(str_detect(names(tmp_ls), x) & str_detect(names(tmp_ls), abbr_vec[res_df_sub$method[i]]))
+                                  rasterize(resReDraw(df_ = tmp_ls[[idx]][["plot_env"]][["df_"]], 
+                                                      colnames(tmp_ls[[idx]][["plot_env"]][["df_"]])[3], 
+                                                      pal_set, ifelse(res_df_sub$method[i] %in% c("PRECAST","Seurat","spatialMNN_par"),T,F), 
+                                                      res_df_sub$method[i]), 
+                                          layers='Point', dpi=150)
+                                }))
+  
+}
+
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_LIBD_bench_res_all.pdf")), width = 27, height = 36)
+ggarrange(plotlist = slide_ls[sapply(1:12,\(x){12*(1:9)-12+x}) %>% as.vector()], ncol = 9, nrow = 12) %>% print()
+dev.off()
+
+write.csv(res_df_sub,file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/",paste0(Sys.Date(),"_LIBD_bench_res.csv")))
 ```
 
 ## STARmap
@@ -190,7 +273,7 @@ res_df_sub$mem_gb <- res_df_sub$mem/1024
 
 res_df_sub$time_sec <- res_df_sub$toc-res_df_sub$tic
 
-res_df_sub <- subset(res_df_sub, method != "spatialMNN")
+res_df_sub <- subset(res_df_sub, method != "spatialMNN" & method != "BayesSpace" )
 
 fig_ls2 <- list()
 
@@ -217,27 +300,75 @@ dev.off()
 slide_ls <- list()
 run_id = 1
 sel_sample = 1
+
+
 # load ground truth
 tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/STARmap_groundtruth.rds")
-slide_ls[["GT"]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = "Ground Truth"), 
+slide_ls[["GT"]] <- rasterize(resReDraw(df_ = tmp_ls[[sel_sample]][["plot_env"]][["df_"]], 
+                                        "Layer", pal_set, F, "Ground Truth"), 
                               layers='Point', dpi=150)
+
+sel_sample_id = str_sub(names(tmp_ls)[3],4)
+
 # load results
 for(i in which(res_df_sub$run == run_id)){
-  if(res_df_sub$method[i] != "BANKSY" & res_df_sub$method[i] != "BayesSpace"){
-    tmp_ls <- readRDS(file.path(work_dir,"fig2_STARmap","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
-    slide_ls[[res_df_sub$method[i]]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = res_df_sub$method[i]), 
-                                                  layers='Point', dpi=150)
-    if(res_df_sub$method[i] %in% c("MENDER","spatialMNN_par","PRECAST","SLAT")){
-      slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]] <- slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]] %>% 
-        mutate(tmp_y = y, y = x, x = tmp_y)
-    } 
-  }
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_STARmap","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  
+  slide_ls[[res_df_sub$method[i]]] <- rasterize(resReDraw(df_ = tmp_ls[[sel_sample]][["plot_env"]][["df_"]], 
+                                                          colnames(tmp_ls[[sel_sample]][["plot_env"]][["df_"]])[3], 
+                                                          pal_set, ifelse(res_df_sub$method[i] %in% c("MENDER","SLAT"),T,F), 
+                                                          res_df_sub$method[i]), 
+                                                layers='Point', dpi=150)
+  
 }
 
-pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_bench_res.pdf")), width = 10, height = 4)
-ggarrange(plotlist = slide_ls, ncol = 4, nrow = 2) %>% print()
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_bench_res.pdf")), width = 20, height = 8)
+ggarrange(plotlist = slide_ls, ncol = 5, nrow = 2) %>% print()
 dev.off()
 
+```
+
+```{r}
+slide_ls <- list()
+run_id = 1
+
+abbr_vec <- c("BA","BA","BS","ME","PC","ME","SR","SP","SM") %>% 
+  `names<-`(c('BANKSY','BASS','BayesSpace','MENDER','PRECAST','SLAT','Seurat','spatialMNN_par','spatialMNN'))
+
+# load ground truth
+tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/STARmap_groundtruth.rds")
+name_vec <- str_remove_all(names(tmp_ls),"GT_")
+
+slide_ls <- c(slide_ls, 
+                       lapply(name_vec,
+                              \(x){
+                                rasterize(resReDraw(df_ = tmp_ls[[paste0("GT_",x)]][["plot_env"]][["df_"]], 
+                                                    "Layer", pal_set, F, x), 
+                                        layers='Point', dpi=150)
+                              }))
+
+# load results
+for(i in which(res_df_sub$run == run_id)){
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_STARmap","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  
+  slide_ls <- c(slide_ls, 
+                         lapply(name_vec,
+                                \(x){
+                                  idx <- which(str_detect(names(tmp_ls), x) & str_detect(names(tmp_ls), abbr_vec[res_df_sub$method[i]]))
+                                  rasterize(resReDraw(df_ = tmp_ls[[idx]][["plot_env"]][["df_"]], 
+                                                      colnames(tmp_ls[[idx]][["plot_env"]][["df_"]])[3], 
+                                                      pal_set, ifelse(res_df_sub$method[i] %in% c("MENDER","SLAT","PRECAST"),T,F), 
+                                                      res_df_sub$method[i]), 
+                                          layers='Point', dpi=150)
+                                }))
+  
+}
+
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_bench_res_all.pdf")), width = 32, height = 9)
+ggarrange(plotlist = slide_ls[sapply(1:3,\(x){3*(1:8)-3+x}) %>% as.vector()], ncol = 8, nrow = 3) %>% print()
+dev.off()
+
+write.csv(res_df_sub,file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/",paste0(Sys.Date(),"_STARmap_bench_res.csv")))
 ```
 
 
@@ -269,7 +400,7 @@ res_df_sub <- res_df %>%
 
 res_df_sub$mem_gb <- res_df_sub$mem/1024
 
-res_df_sub$time_sec <- (res_df_sub$toc-res_df_sub$tic)/60
+res_df_sub$time_min <- (res_df_sub$toc-res_df_sub$tic)/60
 
 res_df_sub <- subset(res_df_sub, method != "spatialMNN_par")
 
@@ -281,7 +412,7 @@ fig_ls3[["NMI_stat"]] <- barplotWrapper(res_df_sub,"method","nmi", method_pal, "
  
 fig_ls3[["Mem_stat"]] <- barplotWrapper(res_df_sub,"method","mem_gb", method_pal, "Memory MERFISH", "Memory(GB)") + NoLegend()
 
-fig_ls3[["Time_stat"]] <- barplotWrapper(res_df_sub,"method","time_sec", method_pal, "Time MERFISH", "Time(Min)") + NoLegend()
+fig_ls3[["Time_stat"]] <- barplotWrapper(res_df_sub,"method","time_min", method_pal, "Time MERFISH", "Time(Min)") + NoLegend()
 
 pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_MERFISH_bench_summary.pdf")), width = 6, height = 4)
 ggarrange(plotlist = fig_ls3[c(1,3,4)], ncol = 3, nrow = 1) %>% print()
@@ -294,29 +425,80 @@ dev.off()
 ```{r}
 slide_ls <- list()
 run_id = 1
-sel_sample = 1
+sel_sample = 3
+
+pal_set2 <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#7FC97F", "#FF7F00", "#FFFF33",
+              "#A65628", "#F781BF", "#7570B3", "#FDC086", "#E7298A", "#E6AB02", "#286CE0", "#119999", "#999999")
+
 # load ground truth
 tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/MERFISH_groundtruth.rds")
-slide_ls[["GT"]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = "Ground Truth"), 
+slide_ls[["GT"]] <- rasterize(resReDraw(df_ = tmp_ls[[sel_sample]][["plot_env"]][["df_"]], 
+                                        "Tissue", pal_set2, T, "Ground Truth"), 
                               layers='Point', dpi=150)
+
+sel_sample_id = str_sub(names(tmp_ls)[3],4)
+
 # load results
 for(i in which(res_df_sub$run == run_id)){
-  if(res_df_sub$method[i] != "BANKSY" & res_df_sub$method[i] != "BayesSpace"){
-    tmp_ls <- readRDS(file.path(work_dir,"fig2_MERFISH","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
-    slide_ls[[res_df_sub$method[i]]] <- rasterize(tmp_ls[[sel_sample]] + theme_void() + NoLegend() + labs(title = res_df_sub$method[i]), 
-                                                  layers='Point', dpi=150)
-    if(res_df_sub$method[i] %in% c("MENDER","spatialMNN_par","PRECAST","SLAT")){
-      slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]] <- slide_ls[[res_df_sub$method[i]]][["plot_env"]][["df_"]] %>% 
-        mutate(tmp_y = y, y = x, x = tmp_y)
-    } 
-  }
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_MERFISH","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  tmp_df <- tmp_ls[[which(str_detect(names(tmp_ls),paste0(abbr_vec[res_df_sub$method[i]],".+",sel_sample_id)))]][["plot_env"]][["df_"]]
+  
+  slide_ls[[res_df_sub$method[i]]] <- rasterize(resReDraw(df_ = tmp_df, colnames(tmp_df)[3], 
+                                                          pal_set2, ifelse(res_df_sub$method[i] %in% c("MENDER","SLAT","PRECAST"),F,T), 
+                                                          res_df_sub$method[i]), 
+                                                layers='Point', dpi=150)
+  
 }
 
-pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_STARmap_bench_res.pdf")), width = 10, height = 4)
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_MERFISH_bench_res.pdf")), width = 20, height = 8)
 ggarrange(plotlist = slide_ls, ncol = 4, nrow = 2) %>% print()
 dev.off()
 
 ```
+
+```{r}
+slide_ls <- list()
+run_id = 1
+
+abbr_vec <- c("BA","BA","BS","ME","PC","SL","SR","SP","SM") %>% 
+  `names<-`(c('BANKSY','BASS','BayesSpace','MENDER','PRECAST','SLAT','Seurat','spatialMNN_par','spatialMNN'))
+
+# load ground truth
+tmp_ls <- readRDS("~/GitHub/atlasClustering/archived/MERFISH_groundtruth.rds")
+name_vec <- str_remove_all(names(tmp_ls),"GT_")
+
+slide_ls <- c(slide_ls, 
+                       lapply(name_vec,
+                              \(x){
+                                rasterize(resReDraw(df_ = tmp_ls[[paste0("GT_",x)]][["plot_env"]][["df_"]], 
+                                                    "Tissue", pal_set2, T, x), 
+                                        layers='Point', dpi=150)
+                              }))
+
+# load results
+for(i in which(res_df_sub$run == run_id)){
+  tmp_ls <- readRDS(file.path(work_dir,"fig2_MERFISH","result",paste0("run",run_id),paste0(res_df_sub$file[i],"_fig.rds")))
+  
+  slide_ls <- c(slide_ls, 
+                         lapply(name_vec,
+                                \(x){
+                                  idx <- which(str_detect(names(tmp_ls), x) & str_detect(names(tmp_ls), abbr_vec[res_df_sub$method[i]]))
+                                  rasterize(resReDraw(df_ = tmp_ls[[idx]][["plot_env"]][["df_"]], 
+                                                      colnames(tmp_ls[[idx]][["plot_env"]][["df_"]])[3], 
+                                                      pal_set2, ifelse(res_df_sub$method[i] %in% c("MENDER","SLAT","PRECAST"),F,T), 
+                                                      res_df_sub$method[i]), 
+                                          layers='Point', dpi=150)
+                                }))
+  
+}
+
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_MERFISH_bench_res_all.pdf")), width = 36, height = 48)
+ggarrange(plotlist = slide_ls[sapply(1:31,\(x){31*(1:6)-31+x}) %>% as.vector()], ncol = 12, nrow = 16) %>% print()
+dev.off()
+
+write.csv(res_df_sub,file = file.path("~/GitHub/atlasClustering/archived/benchmark_res/",paste0(Sys.Date(),"_MERFISH_bench_res.csv")))
+```
+
 
 ## Simulation
 
@@ -337,30 +519,31 @@ for(run_id in 1:5){
 
 # select best SLAT result
 res_df_sub <- res_df %>%
-  mutate(sample_num = sapply(ari_vec, \(x) stringr::str_split(x, pattern = ",") %>% unlist %>% length)) %>% 
-  group_by(run, method, sample_num) %>%
-  slice(which.max(ari)) %>%
-  ungroup()
+  mutate(sample_num = sapply(ari_vec, \(x) stringr::str_split(x, pattern = ",") %>% unlist %>% length)) #%>% 
+  #group_by(run, method, sample_num) %>%
+  #slice(which.max(ari)) %>%
+  #ungroup()
 
 res_df_sub$mem_gb <- res_df_sub$mem/1024
 
 res_df_sub$time_sec <- (res_df_sub$toc-res_df_sub$tic)/60
 
-res_df_sub <- subset(res_df_sub, method != "spatialMNN_par")
+res_df_sub <- subset(res_df_sub, method != "spatialMNN_par" & sample_num != 51)
 
-fig_ls3 <- list()
+fig_ls4 <- list()
 
-fig_ls3[["ARI_stat"]] <- barplotWrapper(res_df_sub,"method","ari", method_pal, "ARI MERFISH", "ARI") + NoLegend()
+fig_ls4[["ARI_stat"]] <- lineplotWrapper(res_df_sub, "method", "ari", "sample_num", method_pal, "ARI MERFISH", "ARI") + NoLegend()
 
-fig_ls3[["NMI_stat"]] <- barplotWrapper(res_df_sub,"method","nmi", method_pal, "NMI MERFISH", "NMI") + NoLegend()
+fig_ls4[["NMI_stat"]] <- lineplotWrapper(res_df_sub, "method", "nmi", "sample_num", method_pal, "NMI MERFISH", "NMI") + NoLegend()
  
-fig_ls3[["Mem_stat"]] <- barplotWrapper(res_df_sub,"method","mem_gb", method_pal, "Memory MERFISH", "Memory(GB)") + NoLegend()
+fig_ls4[["Mem_stat"]] <- lineplotWrapper(res_df_sub, "method", "mem_gb", "sample_num", method_pal, "Memory MERFISH", "Memory(GB)") + NoLegend()
 
-fig_ls3[["Time_stat"]] <- barplotWrapper(res_df_sub,"method","time_sec", method_pal, "Time MERFISH", "Time(Min)") + NoLegend()
+fig_ls4[["Time_stat"]] <-lineplotWrapper(res_df_sub, "method", "time_sec", "sample_num", method_pal, "Time MERFISH", "Time(Min)") + NoLegend()
 
-pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_MERFISH_bench_summary.pdf")), width = 6, height = 4)
-ggarrange(plotlist = fig_ls3[c(1,3,4)], ncol = 3, nrow = 1) %>% print()
+pdf(file = file.path("~/GitHub/atlasClustering/archived/fig",paste0(Sys.Date(),"_simulation_bench_summary.pdf")), width = 16, height = 4)
+ggarrange(plotlist = fig_ls4, ncol = 4, nrow = 1) %>% print()
 dev.off()
 
 ```
+
 
