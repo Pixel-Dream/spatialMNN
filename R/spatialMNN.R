@@ -49,9 +49,14 @@ stg1_func <- function(seu_obj, cor_threshold = 0.2, nn = 12, nn_2=20, cl_resolut
     rm(mat)
     gc()
   }else{
-    seu_obj <- ScaleData(seu_obj, features = rownames(seu_obj),verbose = F)
-    seu_obj <- RunPCA(seu_obj, features = VariableFeatures(object = seu_obj),verbose = F)
-    PCA_res <- seu_obj@reductions[["pca"]]@cell.embeddings
+    if(is.null(seu_obj@reductions[["pca"]])){
+      seu_obj <- ScaleData(seu_obj, features = rownames(seu_obj),verbose = F)
+      seu_obj <- RunPCA(seu_obj, features = VariableFeatures(object = seu_obj),verbose = F)
+      PCA_res <- seu_obj@reductions[["pca"]]@cell.embeddings
+    }else{
+      PCA_res <- seu_obj@reductions[["pca"]]@cell.embeddings# use predefined PCA
+    }
+
   }
 
   dist_knn <- dbscan::kNN(seu_obj@meta.data %>% select(coord_x,coord_y),k=nn)
